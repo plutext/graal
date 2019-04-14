@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -46,7 +46,7 @@ public class SignedRemNode extends IntegerDivRemNode implements LIRLowerable {
 
     public static final NodeClass<SignedRemNode> TYPE = NodeClass.create(SignedRemNode.class);
 
-    protected SignedRemNode(ValueNode x, ValueNode y, GuardingNode zeroCheck) {
+    public SignedRemNode(ValueNode x, ValueNode y, GuardingNode zeroCheck) {
         this(TYPE, x, y, zeroCheck);
     }
 
@@ -100,9 +100,6 @@ public class SignedRemNode extends IntegerDivRemNode implements LIRLowerable {
                     } else if (xStamp.isNegative()) {
                         // -((-x) & (y - 1))
                         return new NegateNode(new AndNode(new NegateNode(forX), ConstantNode.forIntegerStamp(stamp, constY - 1)));
-                    } else {
-                        // x - ((x / y) << log2(y))
-                        return SubNode.create(forX, LeftShiftNode.create(SignedDivNode.canonical(forX, constY, view), ConstantNode.forInt(CodeUtil.log2(constY)), view), view);
                     }
                 }
             }

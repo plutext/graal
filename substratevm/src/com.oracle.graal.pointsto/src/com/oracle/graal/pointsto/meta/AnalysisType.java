@@ -43,11 +43,11 @@ import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 
 import org.graalvm.compiler.debug.GraalError;
 import org.graalvm.compiler.graph.Node;
+import org.graalvm.util.GuardedAnnotationAccess;
 import org.graalvm.word.WordBase;
 
 import com.oracle.graal.pointsto.BigBang;
 import com.oracle.graal.pointsto.BigBang.ConstantObjectsProfiler;
-import com.oracle.graal.pointsto.api.AnnotationAccess;
 import com.oracle.graal.pointsto.api.DefaultUnsafePartition;
 import com.oracle.graal.pointsto.api.PointstoOptions;
 import com.oracle.graal.pointsto.api.UnsafePartitionKind;
@@ -159,7 +159,7 @@ public class AnalysisType implements WrappedJavaType, OriginalClassProvider, Com
         isArray = wrapped.isArray();
         this.storageKind = storageKind;
         this.unsafeAccessedFieldsRegistered = false;
-        if (universe.hostVM.analysisPolicy().needsConstantCache()) {
+        if (universe.analysisPolicy().needsConstantCache()) {
             this.constantObjectsCache = new ConcurrentHashMap<>();
         }
 
@@ -201,7 +201,7 @@ public class AnalysisType implements WrappedJavaType, OriginalClassProvider, Com
     private AnalysisType[] convertTypes(ResolvedJavaType[] originalTypes) {
         List<AnalysisType> result = new ArrayList<>(originalTypes.length);
         for (ResolvedJavaType originalType : originalTypes) {
-            if (!universe.hostVM().platformSupported(originalType)) {
+            if (!universe.platformSupported(originalType)) {
                 /* Ignore types that are not in our platform (including hosted-only types). */
                 continue;
             }
@@ -703,7 +703,7 @@ public class AnalysisType implements WrappedJavaType, OriginalClassProvider, Com
     @Override
     public void initialize() {
         if (!wrapped.isInitialized()) {
-            throw GraalError.shouldNotReachHere("Classes can only be initialized using methods in ClassInitializationFeature");
+            throw GraalError.shouldNotReachHere("Classes can only be initialized using methods in ClassInitializationFeature: " + toClassName());
         }
     }
 
@@ -890,17 +890,17 @@ public class AnalysisType implements WrappedJavaType, OriginalClassProvider, Com
 
     @Override
     public Annotation[] getAnnotations() {
-        return AnnotationAccess.getAnnotations(wrapped);
+        return GuardedAnnotationAccess.getAnnotations(wrapped);
     }
 
     @Override
     public Annotation[] getDeclaredAnnotations() {
-        return AnnotationAccess.getDeclaredAnnotations(wrapped);
+        return GuardedAnnotationAccess.getDeclaredAnnotations(wrapped);
     }
 
     @Override
     public <T extends Annotation> T getAnnotation(Class<T> annotationClass) {
-        return AnnotationAccess.getAnnotation(wrapped, annotationClass);
+        return GuardedAnnotationAccess.getAnnotation(wrapped, annotationClass);
     }
 
     @Override
@@ -924,7 +924,7 @@ public class AnalysisType implements WrappedJavaType, OriginalClassProvider, Com
         try {
             return wrapped.isLocal();
         } catch (InternalError e) {
-            universe.getHostVM().warn("unknown locality of class " + wrapped.getName() + ", assuming class is not local. To remove the warning report an issue " +
+            universe.hostVM().warn("unknown locality of class " + wrapped.getName() + ", assuming class is not local. To remove the warning report an issue " +
                             "to the library or language author. The issue is caused by " + wrapped.getName() + " which is not following the naming convention.");
             return false;
         }
@@ -937,7 +937,14 @@ public class AnalysisType implements WrappedJavaType, OriginalClassProvider, Com
 
     @Override
     public AnalysisType getEnclosingType() {
-        return universe.lookup(wrapped.getEnclosingType());
+        ResolvedJavaType wrappedEnclosingType;
+        try {
+            wrappedEnclosingType = wrapped.getEnclosingType();
+        } catch (NoClassDefFoundError e) {
+            /* Ignore NoClassDefFoundError thrown by enclosing type resolution. */
+            return null;
+        }
+        return universe.lookup(wrappedEnclosingType);
     }
 
     @Override
@@ -957,8 +964,11 @@ public class AnalysisType implements WrappedJavaType, OriginalClassProvider, Com
 
     @Override
     public boolean isLinked() {
-        assert wrapped.isLinked();
-        return true;
+        /*
+         * If the wrapped type is referencing some missing types verification may fail and the type
+         * will not be linked.
+         */
+        return wrapped.isLinked();
     }
 
     @Override
@@ -993,5 +1003,4 @@ public class AnalysisType implements WrappedJavaType, OriginalClassProvider, Com
     public boolean isAnnotation() {
         return (getModifiers() & ANNOTATION) != 0;
     }
-
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,22 +30,29 @@ import org.graalvm.component.installer.model.ComponentStorage;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.text.MessageFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.Date;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import org.graalvm.component.installer.BundleConstants;
 import org.graalvm.component.installer.CommonConstants;
 import org.graalvm.component.installer.Feedback;
@@ -77,6 +84,22 @@ public class DirectoryStorage implements ComponentStorage {
      * The "replaced files" metadata fileName relative to the registry.
      */
     private static final String PATH_REPLACED_FILES = "replaced-files.properties"; // NOI18N
+
+    /**
+     *
+     * Template for license accepted records.
+     */
+    private static final String LICENSE_DIR = "licenses"; // NOI18N'
+
+    /**
+     * Template for license accepted records.
+     */
+    private static final String LICENSE_CONTENTS_NAME = LICENSE_DIR + "/{0}"; // NOI18N'
+
+    /**
+     * Template for license accepted records.
+     */
+    private static final String LICENSE_FILE_TEMPLATE = LICENSE_DIR + "/{0}.accepted/{1}"; // NOI18N'
 
     /**
      * 
@@ -134,7 +157,7 @@ public class DirectoryStorage implements ComponentStorage {
         for (String key : Collections.list((Enumeration<String>) props.propertyNames())) {
             String val = props.getProperty(key, ""); // MOI18N
 
-            String lowerKey = key.toLowerCase();
+            String lowerKey = key.toLowerCase(Locale.ENGLISH);
             if (val.charAt(0) == '"' && val.length() > 1 && val.charAt(val.length() - 1) == '"') { // MOI18N
                 val = val.substring(1, val.length() - 1).trim();
             }
@@ -160,7 +183,7 @@ public class DirectoryStorage implements ComponentStorage {
 
     /**
      * Loads list of components.
-     * 
+     *
      * @return component IDs
      * @throws IOException
      */
@@ -176,18 +199,21 @@ public class DirectoryStorage implements ComponentStorage {
                 return Files.isRegularFile(child.toPath()) && child.getName().endsWith(COMPONENT_FILE_SUFFIX);
             }
         });
-        Set<String> result = new HashSet<>();
-        for (File f : files) {
-            String s = registryPath.relativize(f.toPath()).toString();
-            int e = s.length() - COMPONENT_FILE_SUFFIX.length();
-            result.add(s.substring(0, e));
+        if (files != null) {
+            Set<String> result = new HashSet<>();
+            for (File f : files) {
+                String s = registryPath.relativize(f.toPath()).toString();
+                int e = s.length() - COMPONENT_FILE_SUFFIX.length();
+                result.add(s.substring(0, e));
+            }
+            return result;
+        } else {
+            throw new IllegalArgumentException("File listing of " + d + " returned null.");
         }
-        return result;
     }
 
-    @SuppressWarnings("unchecked")
     ComponentInfo loadMetadataFrom(InputStream fileStream) throws IOException {
-        ComponentInfo ci;
+        // XX clear 'loaded' field once the loading is over
         loaded = new Properties();
         loaded.load(fileStream);
 
@@ -195,29 +221,38 @@ public class DirectoryStorage implements ComponentStorage {
         String name = getRequiredProperty(BundleConstants.BUNDLE_NAME);
         String version = getRequiredProperty(BundleConstants.BUNDLE_VERSION);
 
-        String license = loaded.getProperty(META_LICENSE_FILE);
+        return propertiesToMeta(loaded, new ComponentInfo(id, name, version));
+    }
 
-        ci = new ComponentInfo(id, name, version);
+    public static ComponentInfo propertiesToMeta(Properties loaded, ComponentInfo ci) {
+        String license = loaded.getProperty(BundleConstants.BUNDLE_LICENSE_PATH);
         if (license != null) {
+            SystemUtils.checkCommonRelative(null, license);
             ci.setLicensePath(license);
         }
-        for (String s : Collections.list((Enumeration<String>) loaded.propertyNames())) {
+        for (String s : loaded.stringPropertyNames()) {
             if (s.startsWith(BUNDLE_REQUIRED_PREFIX)) {
                 String k = s.substring(BUNDLE_REQUIRED_PREFIX.length());
-                String v = loaded.getProperty(s, "");
+                String v = loaded.getProperty(s, ""); // NOI18N
                 ci.addRequiredValue(k, v);
             }
         }
-        ci.setPolyglotRebuild(
-                        Boolean.TRUE.toString().equals(loaded.getProperty(BundleConstants.BUNDLE_POLYGLOT_PART, "")));
+        if (Boolean.TRUE.toString().equals(loaded.getProperty(BundleConstants.BUNDLE_POLYGLOT_PART, ""))) { // NOI18N
+            ci.setPolyglotRebuild(true);
+        }
         List<String> ll = new ArrayList<>();
         for (String s : loaded.getProperty(BundleConstants.BUNDLE_WORKDIRS, "").split(":")) {
             String p = s.trim();
             if (!p.isEmpty()) {
+                SystemUtils.checkCommonRelative(null, p);
                 ll.add(p);
             }
         }
         ci.addWorkingDirectories(ll);
+        String licType = loaded.getProperty(BundleConstants.BUNDLE_LICENSE_TYPE);
+        if (licType != null) {
+            ci.setLicenseType(licType);
+        }
         return ci;
     }
 
@@ -236,7 +271,7 @@ public class DirectoryStorage implements ComponentStorage {
 
     /**
      * Loads component files into its metadata.
-     * 
+     *
      * @param ci the component metadata
      * @return initialized ComponentInfo
      * @throws IOException on I/O errors
@@ -254,6 +289,7 @@ public class DirectoryStorage implements ComponentStorage {
         for (String e : s) {
             String trimmed = e.trim();
             if (!trimmed.isEmpty()) {
+                SystemUtils.checkCommonRelative(null, trimmed);
                 result.add(trimmed);
             }
         }
@@ -289,6 +325,7 @@ public class DirectoryStorage implements ComponentStorage {
             for (String x : files.split(" *, *")) { // NOI18N
                 String t = x.trim();
                 if (!t.isEmpty()) {
+                    SystemUtils.checkCommonRelative(null, t);
                     unsorted.add(t);
                 }
             }
@@ -320,7 +357,7 @@ public class DirectoryStorage implements ComponentStorage {
 
     /**
      * Deletes component's files.
-     * 
+     *
      * @param id component id
      * @throws IOException
      */
@@ -334,7 +371,7 @@ public class DirectoryStorage implements ComponentStorage {
 
     /**
      * Will persist component's metadata.
-     * 
+     *
      * @param info
      * @throws IOException on failure
      */
@@ -349,13 +386,16 @@ public class DirectoryStorage implements ComponentStorage {
         saveComponentFileList(info);
     }
 
-    Properties metaToProperties(ComponentInfo info) {
+    public static Properties metaToProperties(ComponentInfo info) {
         SortedProperties p = new SortedProperties();
         p.setProperty(BundleConstants.BUNDLE_ID, info.getId());
         p.setProperty(BundleConstants.BUNDLE_NAME, info.getName());
         p.setProperty(BundleConstants.BUNDLE_VERSION, info.getVersionString());
         if (info.getLicensePath() != null) {
-            p.setProperty(META_LICENSE_FILE, info.getLicensePath());
+            p.setProperty(BundleConstants.BUNDLE_LICENSE_PATH, info.getLicensePath());
+        }
+        if (info.getLicenseType() != null) {
+            p.setProperty(BundleConstants.BUNDLE_LICENSE_TYPE, info.getLicenseType());
         }
         for (String k : info.getRequiredGraalValues().keySet()) {
             String v = info.getRequiredGraalValues().get(k);
@@ -363,6 +403,10 @@ public class DirectoryStorage implements ComponentStorage {
                 v = ""; // NOI18N
             }
             p.setProperty(BUNDLE_REQUIRED_PREFIX + k, v);
+        }
+
+        if (info.getPostinstMessage() != null) {
+            p.setProperty(BundleConstants.BUNDLE_MESSAGE_POSTINST, info.getPostinstMessage());
         }
         if (info.isPolyglotRebuild()) {
             p.setProperty(BundleConstants.BUNDLE_POLYGLOT_PART, Boolean.TRUE.toString());
@@ -380,5 +424,73 @@ public class DirectoryStorage implements ComponentStorage {
 
         Files.write(listFile, entries, StandardOpenOption.CREATE,
                         StandardOpenOption.TRUNCATE_EXISTING);
+    }
+
+    private static void checkLicenseID(String licenseID) {
+        if (licenseID.contains("/")) {
+            throw new IllegalArgumentException("Invalid license ID: " + licenseID);
+        }
+    }
+
+    @Override
+    public Date licenseAccepted(ComponentInfo info, String licenseID) {
+        checkLicenseID(licenseID);
+        try {
+            String fn = MessageFormat.format(LICENSE_FILE_TEMPLATE, licenseID, info.getId());
+            Path listFile = registryPath.resolve(SystemUtils.fromCommonRelative(fn));
+            if (!Files.isReadable(listFile)) {
+                return null;
+            }
+            return new Date(Files.getLastModifiedTime(listFile).toMillis());
+        } catch (IOException ex) {
+            throw feedback.failure("ERR_CannotReadAcceptance", ex, licenseID);
+        }
+    }
+
+    @Override
+    public void recordLicenseAccepted(ComponentInfo info, String licenseID, String licenseText) throws IOException {
+        if (licenseID == null) {
+            clearRecordedLicenses();
+            return;
+        }
+        checkLicenseID(licenseID);
+        String fn = MessageFormat.format(LICENSE_FILE_TEMPLATE, licenseID, info.getId());
+        Path listFile = registryPath.resolve(SystemUtils.fromCommonRelative(fn));
+        if (listFile == null) {
+            throw new IllegalArgumentException(licenseID);
+        }
+        Path dir = listFile.getParent();
+        if (dir == null) {
+            throw new IllegalArgumentException(licenseID);
+        }
+        if (!Files.isDirectory(dir)) {
+            // create the directory
+            Files.createDirectories(dir);
+            Path contentsFile = registryPath.resolve(SystemUtils.fromCommonRelative(
+                            MessageFormat.format(LICENSE_CONTENTS_NAME, licenseID)));
+            Files.write(contentsFile, Arrays.asList(licenseText.split("\n")));
+        }
+        Date d = new Date();
+        Files.write(listFile, Collections.singletonList(d.toString()), StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+    }
+
+    void clearRecordedLicenses() throws IOException {
+        Path listFile = registryPath.resolve(LICENSE_DIR);
+        if (Files.isDirectory(listFile)) {
+            try (Stream<Path> paths = Files.walk(listFile)) {
+                paths.sorted(Comparator.reverseOrder()).forEach((p) -> {
+                    try {
+                        if (p.equals(listFile)) {
+                            return;
+                        }
+                        Files.delete(p);
+                    } catch (IOException ex) {
+                        throw new UncheckedIOException(ex);
+                    }
+                });
+            } catch (UncheckedIOException ex) {
+                throw ex.getCause();
+            }
+        }
     }
 }

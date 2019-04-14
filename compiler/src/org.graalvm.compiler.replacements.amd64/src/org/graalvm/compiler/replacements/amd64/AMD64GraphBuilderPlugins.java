@@ -32,9 +32,8 @@ import static org.graalvm.compiler.replacements.nodes.UnaryMathIntrinsicNode.Una
 import static org.graalvm.compiler.replacements.nodes.UnaryMathIntrinsicNode.UnaryOperation.LOG10;
 import static org.graalvm.compiler.replacements.nodes.UnaryMathIntrinsicNode.UnaryOperation.SIN;
 import static org.graalvm.compiler.replacements.nodes.UnaryMathIntrinsicNode.UnaryOperation.TAN;
-import static org.graalvm.compiler.serviceprovider.GraalServices.JAVA_SPECIFICATION_VERSION;
-import static org.graalvm.compiler.serviceprovider.GraalServices.Java11OrEarlier;
-import static org.graalvm.compiler.serviceprovider.GraalServices.Java8OrEarlier;
+import static org.graalvm.compiler.serviceprovider.JavaVersionUtil.Java11OrEarlier;
+import static org.graalvm.compiler.serviceprovider.JavaVersionUtil.Java8OrEarlier;
 
 import java.util.Arrays;
 
@@ -71,7 +70,7 @@ import sun.misc.Unsafe;
 
 public class AMD64GraphBuilderPlugins {
 
-    public static void register(Plugins plugins, BytecodeProvider replacementsBytecodeProvider, AMD64 arch, boolean arithmeticStubs, boolean explicitUnsafeNullChecks) {
+    public static void register(Plugins plugins, BytecodeProvider replacementsBytecodeProvider, AMD64 arch, boolean explicitUnsafeNullChecks, boolean emitJDK9StringSubstitutions) {
         InvocationPlugins invocationPlugins = plugins.getInvocationPlugins();
         invocationPlugins.defer(new Runnable() {
             @Override
@@ -83,9 +82,11 @@ public class AMD64GraphBuilderPlugins {
                                 new JavaKind[]{JavaKind.Int, JavaKind.Long, JavaKind.Object, JavaKind.Boolean, JavaKind.Byte, JavaKind.Short, JavaKind.Char, JavaKind.Float, JavaKind.Double});
                 registerUnsafePlugins(invocationPlugins, replacementsBytecodeProvider, explicitUnsafeNullChecks);
                 registerStringPlugins(invocationPlugins, replacementsBytecodeProvider);
-                registerStringLatin1Plugins(invocationPlugins, replacementsBytecodeProvider);
-                registerStringUTF16Plugins(invocationPlugins, replacementsBytecodeProvider);
-                registerMathPlugins(invocationPlugins, arch, arithmeticStubs, replacementsBytecodeProvider);
+                if (emitJDK9StringSubstitutions) {
+                    registerStringLatin1Plugins(invocationPlugins, replacementsBytecodeProvider);
+                    registerStringUTF16Plugins(invocationPlugins, replacementsBytecodeProvider);
+                }
+                registerMathPlugins(invocationPlugins, arch, replacementsBytecodeProvider);
                 registerArraysEqualsPlugins(invocationPlugins, replacementsBytecodeProvider);
             }
         });
@@ -155,21 +156,15 @@ public class AMD64GraphBuilderPlugins {
         }
     }
 
-    private static void registerMathPlugins(InvocationPlugins plugins, AMD64 arch, boolean arithmeticStubs, BytecodeProvider bytecodeProvider) {
+    private static void registerMathPlugins(InvocationPlugins plugins, AMD64 arch, BytecodeProvider bytecodeProvider) {
         Registration r = new Registration(plugins, Math.class, bytecodeProvider);
         registerUnaryMath(r, "log", LOG);
         registerUnaryMath(r, "log10", LOG10);
         registerUnaryMath(r, "exp", EXP);
         registerBinaryMath(r, "pow", POW);
-        if (arithmeticStubs) {
-            registerUnaryMath(r, "sin", SIN);
-            registerUnaryMath(r, "cos", COS);
-            registerUnaryMath(r, "tan", TAN);
-        } else {
-            r.registerMethodSubstitution(AMD64MathSubstitutions.class, "sin", double.class);
-            r.registerMethodSubstitution(AMD64MathSubstitutions.class, "cos", double.class);
-            r.registerMethodSubstitution(AMD64MathSubstitutions.class, "tan", double.class);
-        }
+        registerUnaryMath(r, "sin", SIN);
+        registerUnaryMath(r, "cos", COS);
+        registerUnaryMath(r, "tan", TAN);
 
         if (arch.getFeatures().contains(CPUFeature.SSE4_1)) {
             registerRound(r, "rint", RoundingMode.NEAREST);
@@ -221,30 +216,26 @@ public class AMD64GraphBuilderPlugins {
     }
 
     private static void registerStringLatin1Plugins(InvocationPlugins plugins, BytecodeProvider replacementsBytecodeProvider) {
-        if (JAVA_SPECIFICATION_VERSION >= 9) {
-            Registration r = new Registration(plugins, "java.lang.StringLatin1", replacementsBytecodeProvider);
-            r.setAllowOverwrite(true);
-            r.registerMethodSubstitution(AMD64StringLatin1Substitutions.class, "compareTo", byte[].class, byte[].class);
-            r.registerMethodSubstitution(AMD64StringLatin1Substitutions.class, "compareToUTF16", byte[].class, byte[].class);
-            r.registerMethodSubstitution(AMD64StringLatin1Substitutions.class, "inflate", byte[].class, int.class, char[].class, int.class, int.class);
-            r.registerMethodSubstitution(AMD64StringLatin1Substitutions.class, "inflate", byte[].class, int.class, byte[].class, int.class, int.class);
-            r.registerMethodSubstitution(AMD64StringLatin1Substitutions.class, "indexOf", byte[].class, int.class, int.class);
-            r.registerMethodSubstitution(AMD64StringLatin1Substitutions.class, "indexOf", byte[].class, int.class, byte[].class, int.class, int.class);
-        }
+        Registration r = new Registration(plugins, "java.lang.StringLatin1", replacementsBytecodeProvider);
+        r.setAllowOverwrite(true);
+        r.registerMethodSubstitution(AMD64StringLatin1Substitutions.class, "compareTo", byte[].class, byte[].class);
+        r.registerMethodSubstitution(AMD64StringLatin1Substitutions.class, "compareToUTF16", byte[].class, byte[].class);
+        r.registerMethodSubstitution(AMD64StringLatin1Substitutions.class, "inflate", byte[].class, int.class, char[].class, int.class, int.class);
+        r.registerMethodSubstitution(AMD64StringLatin1Substitutions.class, "inflate", byte[].class, int.class, byte[].class, int.class, int.class);
+        r.registerMethodSubstitution(AMD64StringLatin1Substitutions.class, "indexOf", byte[].class, int.class, int.class);
+        r.registerMethodSubstitution(AMD64StringLatin1Substitutions.class, "indexOf", byte[].class, int.class, byte[].class, int.class, int.class);
     }
 
     private static void registerStringUTF16Plugins(InvocationPlugins plugins, BytecodeProvider replacementsBytecodeProvider) {
-        if (JAVA_SPECIFICATION_VERSION >= 9) {
-            Registration r = new Registration(plugins, "java.lang.StringUTF16", replacementsBytecodeProvider);
-            r.setAllowOverwrite(true);
-            r.registerMethodSubstitution(AMD64StringUTF16Substitutions.class, "compareTo", byte[].class, byte[].class);
-            r.registerMethodSubstitution(AMD64StringUTF16Substitutions.class, "compareToLatin1", byte[].class, byte[].class);
-            r.registerMethodSubstitution(AMD64StringUTF16Substitutions.class, "compress", char[].class, int.class, byte[].class, int.class, int.class);
-            r.registerMethodSubstitution(AMD64StringUTF16Substitutions.class, "compress", byte[].class, int.class, byte[].class, int.class, int.class);
-            r.registerMethodSubstitution(AMD64StringUTF16Substitutions.class, "indexOfCharUnsafe", byte[].class, int.class, int.class, int.class);
-            r.registerMethodSubstitution(AMD64StringUTF16Substitutions.class, "indexOfUnsafe", byte[].class, int.class, byte[].class, int.class, int.class);
-            r.registerMethodSubstitution(AMD64StringUTF16Substitutions.class, "indexOfLatin1Unsafe", byte[].class, int.class, byte[].class, int.class, int.class);
-        }
+        Registration r = new Registration(plugins, "java.lang.StringUTF16", replacementsBytecodeProvider);
+        r.setAllowOverwrite(true);
+        r.registerMethodSubstitution(AMD64StringUTF16Substitutions.class, "compareTo", byte[].class, byte[].class);
+        r.registerMethodSubstitution(AMD64StringUTF16Substitutions.class, "compareToLatin1", byte[].class, byte[].class);
+        r.registerMethodSubstitution(AMD64StringUTF16Substitutions.class, "compress", char[].class, int.class, byte[].class, int.class, int.class);
+        r.registerMethodSubstitution(AMD64StringUTF16Substitutions.class, "compress", byte[].class, int.class, byte[].class, int.class, int.class);
+        r.registerMethodSubstitution(AMD64StringUTF16Substitutions.class, "indexOfCharUnsafe", byte[].class, int.class, int.class, int.class);
+        r.registerMethodSubstitution(AMD64StringUTF16Substitutions.class, "indexOfUnsafe", byte[].class, int.class, byte[].class, int.class, int.class);
+        r.registerMethodSubstitution(AMD64StringUTF16Substitutions.class, "indexOfLatin1Unsafe", byte[].class, int.class, byte[].class, int.class, int.class);
     }
 
     private static void registerUnsafePlugins(InvocationPlugins plugins, BytecodeProvider replacementsBytecodeProvider, boolean explicitUnsafeNullChecks) {

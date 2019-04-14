@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -34,32 +34,37 @@ import org.graalvm.word.UnsignedWord;
 import org.graalvm.word.WordFactory;
 
 import com.oracle.svm.core.annotate.AutomaticFeature;
+import com.oracle.svm.core.annotate.Uninterruptible;
 import com.oracle.svm.core.posix.headers.LibC;
 
 class UnmanagedMemorySupportImpl implements UnmanagedMemorySupport {
     @Override
+    @Uninterruptible(reason = "Called from uninterruptible code.")
     public <T extends PointerBase> T malloc(UnsignedWord size) {
         return LibC.malloc(size);
     }
 
     @Override
+    @Uninterruptible(reason = "Called from uninterruptible code.")
     public <T extends PointerBase> T calloc(UnsignedWord size) {
         return LibC.calloc(WordFactory.unsigned(1), size);
     }
 
     @Override
+    @Uninterruptible(reason = "Called from uninterruptible code.")
     public <T extends PointerBase> T realloc(T ptr, UnsignedWord size) {
         return LibC.realloc(ptr, size);
     }
 
     @Override
+    @Uninterruptible(reason = "Called from uninterruptible code.")
     public void free(PointerBase ptr) {
         LibC.free(ptr);
     }
 }
 
 @AutomaticFeature
-@Platforms({Platform.LINUX.class, Platform.DARWIN.class})
+@Platforms({Platform.LINUX_AND_JNI.class, Platform.DARWIN_AND_JNI.class})
 class UnmanagedMemoryFeature implements Feature {
     @Override
     public void afterRegistration(AfterRegistrationAccess access) {

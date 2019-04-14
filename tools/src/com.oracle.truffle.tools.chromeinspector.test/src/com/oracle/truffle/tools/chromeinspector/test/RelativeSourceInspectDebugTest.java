@@ -148,9 +148,11 @@ public class RelativeSourceInspectDebugTest {
                             "{\"method\":\"Debugger.paused\",\"params\":{\"reason\":\"other\",\"hitBreakpoints\":[]," +
                                     "\"callFrames\":[{\"callFrameId\":\"0\",\"functionName\":\"" + funcName + "\"," +
                                                      "\"scopeChain\":[{\"name\":\"" + funcName + "\",\"type\":\"local\",\"object\":{\"description\":\"" + funcName + "\",\"type\":\"object\",\"objectId\":\"" + objId + "\"}}]," +
+                                                     "\"this\":{\"subtype\":\"null\",\"description\":\"null\",\"type\":\"object\",\"objectId\":\"" + (objId + 1) + "\"}," +
                                                      "\"functionLocation\":{\"scriptId\":\"" + i + "\",\"columnNumber\":0,\"lineNumber\":0}," +
-                                                     "\"location\":{\"scriptId\":\"" + i + "\",\"columnNumber\":0,\"lineNumber\":0}}]}}\n"));
-            objId++;
+                                                     "\"location\":{\"scriptId\":\"" + i + "\",\"columnNumber\":0,\"lineNumber\":0}," +
+                                                     "\"url\":\"" + resolvedURI[i] + "\"}]}}\n"));
+            objId += 2;
             tester.sendMessage("{\"id\":" + cmdId + ",\"method\":\"Debugger.getScriptSource\",\"params\":{\"scriptId\":\"" + i + "\"}}");
             assertTrue(tester.compareReceivedMessages(
                             "{\"result\":{\"scriptSource\":\"" + sourceContent[i].replace("\n", "\\n") + "\"},\"id\":" + cmdId + "}\n"));
@@ -189,14 +191,16 @@ public class RelativeSourceInspectDebugTest {
                         "{\"result\":{},\"id\":3}\n" +
                         "{\"method\":\"Runtime.executionContextCreated\",\"params\":{\"context\":{\"origin\":\"\",\"name\":\"test\",\"id\":1}}}\n"));
         tester.eval(source);
-        assertTrue(tester.compareReceivedMessages("{\"method\":\"Debugger.scriptParsed\",\"params\":{\"endLine\":3,\"scriptId\":\"0\",\"endColumn\":0,\"startColumn\":0,\"startLine\":0,\"length\":168,\"executionContextId\":1,\"url\":\":relative/path\",\"hash\":\"ea519706da04092af2f9afd9f84696c2fe44bc91\"}}\n"));
+        assertTrue(tester.compareReceivedMessages("{\"method\":\"Debugger.scriptParsed\",\"params\":{\"endLine\":3,\"scriptId\":\"0\",\"endColumn\":0,\"startColumn\":0,\"startLine\":0,\"length\":168,\"executionContextId\":1,\"url\":\"relative/path\",\"hash\":\"ea519706da04092af2f9afd9f84696c2fe44bc91\"}}\n"));
         // Suspend at the beginning of the script:
         assertTrue(tester.compareReceivedMessages(
                         "{\"method\":\"Debugger.paused\",\"params\":{\"reason\":\"other\",\"hitBreakpoints\":[]," +
                                 "\"callFrames\":[{\"callFrameId\":\"0\",\"functionName\":\"relative\"," +
                                                  "\"scopeChain\":[{\"name\":\"relative\",\"type\":\"local\",\"object\":{\"description\":\"relative\",\"type\":\"object\",\"objectId\":\"1\"}}]," +
+                                                 "\"this\":{\"subtype\":\"null\",\"description\":\"null\",\"type\":\"object\",\"objectId\":\"2\"}," +
                                                  "\"functionLocation\":{\"scriptId\":\"0\",\"columnNumber\":0,\"lineNumber\":0}," +
-                                                 "\"location\":{\"scriptId\":\"0\",\"columnNumber\":0,\"lineNumber\":0}}]}}\n"));
+                                                 "\"location\":{\"scriptId\":\"0\",\"columnNumber\":0,\"lineNumber\":0}," +
+                                                 "\"url\":\"relative/path\"}]}}\n"));
         tester.sendMessage("{\"id\":1,\"method\":\"Debugger.resume\"}");
         assertTrue(tester.compareReceivedMessages(
                         "{\"result\":{},\"id\":1}\n" +

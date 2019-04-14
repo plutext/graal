@@ -46,10 +46,10 @@ public class NativeImageOptions {
 
     public static final int DEFAULT_MAX_ANALYSIS_SCALING = 16;
 
-    @Option(help = "Class containing the default entry point method. Ignored if kind != EXECUTABLE", type = OptionType.User)//
+    @Option(help = "Class containing the default entry point method. Optional if --shared is used.", type = OptionType.User)//
     public static final HostedOptionKey<String> Class = new HostedOptionKey<>("");
 
-    @Option(help = "Name of the main entry point method. Ignored if kind != EXECUTABLE")//
+    @Option(help = "Name of the main entry point method. Optional if --shared is used.")//
     public static final HostedOptionKey<String> Method = new HostedOptionKey<>("main");
 
     @Option(help = "Name of the output file to be generated", type = OptionType.User)//
@@ -122,6 +122,9 @@ public class NativeImageOptions {
         }
     };
 
+    @Option(help = "Initialize side-effectful application class initializers at image build time.", type = OptionType.User)//
+    public static final HostedOptionKey<Boolean> EagerlyInitializeClasses = new HostedOptionKey<>(true);
+
     @SuppressWarnings("all")
     private static boolean areAssertionsEnabled() {
         boolean assertsEnabled = false;
@@ -129,9 +132,6 @@ public class NativeImageOptions {
         assert assertsEnabled = true;
         return assertsEnabled;
     }
-
-    @Option(help = "Report the original exception cause for unsupported features.")//
-    public static final HostedOptionKey<Boolean> ReportUnsupportedFeaturesCause = new HostedOptionKey<>(false);
 
     /**
      * Enum with all C standards.

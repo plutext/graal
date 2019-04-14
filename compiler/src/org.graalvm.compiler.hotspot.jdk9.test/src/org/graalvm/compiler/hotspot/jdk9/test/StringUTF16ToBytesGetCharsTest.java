@@ -26,8 +26,6 @@ package org.graalvm.compiler.hotspot.jdk9.test;
 
 import static org.junit.Assume.assumeFalse;
 
-import jdk.vm.ci.code.InstalledCode;
-import jdk.vm.ci.meta.ResolvedJavaMethod;
 import org.graalvm.compiler.core.common.CompilationIdentifier;
 import org.graalvm.compiler.hotspot.replacements.StringUTF16Substitutions;
 import org.graalvm.compiler.nodes.StructuredGraph;
@@ -35,8 +33,10 @@ import org.graalvm.compiler.nodes.java.NewArrayNode;
 import org.graalvm.compiler.replacements.arraycopy.ArrayCopyCallNode;
 import org.graalvm.compiler.replacements.test.MethodSubstitutionTest;
 import org.graalvm.compiler.test.AddExports;
-import org.junit.Before;
 import org.junit.Test;
+
+import jdk.vm.ci.code.InstalledCode;
+import jdk.vm.ci.meta.ResolvedJavaMethod;
 
 /**
  * Test substitutions for (innate) methods StringUTF16.toBytes and StringUTF16.getChars provided by
@@ -46,9 +46,9 @@ import org.junit.Test;
 public final class StringUTF16ToBytesGetCharsTest extends MethodSubstitutionTest {
 
     private static final int N = 1000;
+    private static final int N_OVERFLOW = 10;
 
-    @Before
-    public void checkAMD64() {
+    public StringUTF16ToBytesGetCharsTest() {
         assumeFalse(Java8OrEarlier);
     }
 
@@ -73,6 +73,12 @@ public final class StringUTF16ToBytesGetCharsTest extends MethodSubstitutionTest
                 assert dst.length == copiedLength * 2;
                 byte[] dst2 = (byte[]) executeVarargsSafe(code, src, srcDelta, copiedLength);
                 assertDeepEquals(dst, dst2);
+            }
+        }
+        for (int srcOff = 0; srcOff < N_OVERFLOW; ++srcOff) {
+            for (int len = 0; len < N_OVERFLOW; ++len) {
+                char[] src = fillUTF16Chars(new char[N_OVERFLOW]);
+                test(caller, null, src, srcOff, len);
             }
         }
     }
@@ -100,6 +106,15 @@ public final class StringUTF16ToBytesGetCharsTest extends MethodSubstitutionTest
                     char[] dst2 = new char[length];
                     executeVarargsSafe(code, src, srcDelta, srcDelta + copiedLength, dst2, dstDelta);
                     assertDeepEquals(dst, dst2);
+                }
+            }
+        }
+        for (int srcOff = 0; srcOff < N_OVERFLOW; ++srcOff) {
+            for (int dstOff = 0; dstOff < N_OVERFLOW; ++dstOff) {
+                for (int len = 0; len < N_OVERFLOW; ++len) {
+                    byte[] src = fillUTF16Bytes(new byte[N_OVERFLOW]);
+                    char[] dst = new char[N_OVERFLOW];
+                    test(caller, null, src, srcOff, len, dst, dstOff);
                 }
             }
         }

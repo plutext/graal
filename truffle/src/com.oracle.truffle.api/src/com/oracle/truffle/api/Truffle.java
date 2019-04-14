@@ -43,24 +43,20 @@ package com.oracle.truffle.api;
 import java.lang.reflect.Method;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
+import java.util.Iterator;
+import java.util.ServiceConfigurationError;
 import java.util.ServiceLoader;
 
 import com.oracle.truffle.api.impl.DefaultTruffleRuntime;
-import java.util.Iterator;
-import java.util.ServiceConfigurationError;
 
 /**
  * Class for obtaining the Truffle runtime singleton object of this virtual machine.
  *
  * @since 0.8 or earlier
  */
-public class Truffle {
-    /**
-     * @deprecated Accidentally public - don't use.
-     * @since 0.8 or earlier
-     */
-    @Deprecated
-    public Truffle() {
+public final class Truffle {
+
+    private Truffle() {
     }
 
     private static final TruffleRuntime RUNTIME = initRuntime();
@@ -159,7 +155,7 @@ public class Truffle {
         return AccessController.doPrivileged(new PrivilegedAction<TruffleRuntime>() {
             public TruffleRuntime run() {
                 String runtimeClassName = System.getProperty("truffle.TruffleRuntime");
-                if (runtimeClassName != null) {
+                if (runtimeClassName != null && runtimeClassName.length() > 0) {
                     try {
                         ClassLoader cl = Thread.currentThread().getContextClassLoader();
                         Class<?> runtimeClass = Class.forName(runtimeClassName, false, cl);

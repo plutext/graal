@@ -26,6 +26,7 @@ package com.oracle.svm.core.jdk;
 
 import java.util.Locale;
 import java.util.ResourceBundle;
+import java.util.TimeZone;
 
 import org.graalvm.nativeimage.Platform;
 import org.graalvm.nativeimage.Platforms;
@@ -34,7 +35,6 @@ import com.oracle.svm.core.util.VMError;
 
 import jdk.internal.misc.JavaUtilResourceBundleAccess;
 import jdk.internal.misc.SharedSecrets;
-import jdk.internal.module.Modules;
 // Checkstyle: stop
 import sun.util.locale.provider.LocaleProviderAdapter;
 import sun.util.resources.LocaleData;
@@ -46,7 +46,7 @@ public class LocalizationResourceBundles extends LocalizationSupport {
 
     static void initialize(LocalizationSupport localizationSupport) {
         /* Allow runtime access to {@link jdk.internal.misc} classes. */
-        addOpensToAllUnnamed("java.base", "jdk.internal.misc");
+        ModuleUtils.addOpensToAllUnnamed("java.base", "jdk.internal.misc");
         final LocaleProviderAdapter.Type jreLocaleProviderAdapterType = LocaleProviderAdapter.Type.JRE;
         final LocaleData jreLocaleData = new LocaleData(jreLocaleProviderAdapterType);
         final Locale defaultLocale = Locale.getDefault();
@@ -66,6 +66,8 @@ public class LocalizationResourceBundles extends LocalizationSupport {
         final String timeZoneNamesKey = jreLocaleProviderAdapterType.getUtilResourcesPackage() + ".TimeZoneNames";
         final ResourceBundle timeZoneNamesBundle = jreLocaleData.getTimeZoneNames(defaultLocale);
         localizationSupport.addBundleToCache(timeZoneNamesKey, timeZoneNamesBundle);
+        TimeZone.getDefault().getDisplayName();
+
         /* BreakIteratorInfo. */
         final String breakIteratorInfoKey = jreLocaleProviderAdapterType.getTextResourcesPackage() + ".BreakIteratorInfo";
         final ResourceBundle breakIteratorInfoBundle = jreLocaleData.getBreakIteratorInfo(defaultLocale);
@@ -121,8 +123,4 @@ public class LocalizationResourceBundles extends LocalizationSupport {
         return result;
     }
 
-    private static void addOpensToAllUnnamed(String moduleName, String packageName) {
-        final Module loadedModule = Modules.loadModule(moduleName);
-        Modules.addOpensToAllUnnamed(loadedModule, packageName);
-    }
 }

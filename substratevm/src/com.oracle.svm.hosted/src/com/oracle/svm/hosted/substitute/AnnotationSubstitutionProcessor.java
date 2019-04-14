@@ -50,7 +50,6 @@ import org.graalvm.nativeimage.Platform;
 import org.graalvm.nativeimage.Platforms;
 
 import com.oracle.graal.pointsto.BigBang;
-import com.oracle.graal.pointsto.constraints.UnsupportedFeatureException;
 import com.oracle.graal.pointsto.infrastructure.SubstitutionProcessor;
 import com.oracle.graal.pointsto.meta.AnalysisField;
 import com.oracle.svm.core.annotate.Alias;
@@ -67,12 +66,12 @@ import com.oracle.svm.core.annotate.TargetElement;
 import com.oracle.svm.core.option.SubstrateOptionsParser;
 import com.oracle.svm.core.util.UserError;
 import com.oracle.svm.core.util.VMError;
-import com.oracle.svm.hosted.ClassInitializationFeature;
 import com.oracle.svm.hosted.ImageClassLoader;
 import com.oracle.svm.hosted.NativeImageGenerator;
 import com.oracle.svm.hosted.NativeImageOptions;
 import com.oracle.svm.hosted.annotation.AnnotationSubstitutionType;
 import com.oracle.svm.hosted.annotation.CustomSubstitutionMethod;
+import com.oracle.svm.hosted.classinitialization.ClassInitializationSupport;
 
 import jdk.vm.ci.common.NativeImageReinitialize;
 import jdk.vm.ci.meta.MetaAccessProvider;
@@ -96,10 +95,12 @@ public class AnnotationSubstitutionProcessor extends SubstitutionProcessor {
     private final Map<ResolvedJavaType, ResolvedJavaType> typeSubstitutions;
     private final Map<ResolvedJavaMethod, ResolvedJavaMethod> methodSubstitutions;
     private final Map<ResolvedJavaField, ResolvedJavaField> fieldSubstitutions;
+    private ClassInitializationSupport classInitializationSupport;
 
-    public AnnotationSubstitutionProcessor(ImageClassLoader imageClassLoader, MetaAccessProvider metaAccess) {
+    public AnnotationSubstitutionProcessor(ImageClassLoader imageClassLoader, MetaAccessProvider metaAccess, ClassInitializationSupport classInitializationSupport) {
         this.imageClassLoader = imageClassLoader;
         this.metaAccess = metaAccess;
+        this.classInitializationSupport = classInitializationSupport;
 
         deleteAnnotations = new HashMap<>();
         typeSubstitutions = new HashMap<>();
@@ -111,7 +112,7 @@ public class AnnotationSubstitutionProcessor extends SubstitutionProcessor {
     public ResolvedJavaType lookup(ResolvedJavaType type) {
         Delete deleteAnnotation = deleteAnnotations.get(type);
         if (deleteAnnotation != null) {
-            throw new UnsupportedFeatureException(deleteErrorMessage(type, deleteAnnotation, true));
+            throw new DeletedElementException(deleteErrorMessage(type, deleteAnnotation, true));
         }
         ResolvedJavaType substitution = typeSubstitutions.get(type);
         if (substitution != null) {
@@ -136,7 +137,7 @@ public class AnnotationSubstitutionProcessor extends SubstitutionProcessor {
     public ResolvedJavaField lookup(ResolvedJavaField field) {
         Delete deleteAnnotation = deleteAnnotations.get(field);
         if (deleteAnnotation != null) {
-            throw new UnsupportedFeatureException(deleteErrorMessage(field, deleteAnnotation, true));
+            throw new DeletedElementException(deleteErrorMessage(field, deleteAnnotation, true));
         }
         ResolvedJavaField substitution = fieldSubstitutions.get(field);
         if (substitution != null) {
@@ -179,7 +180,7 @@ public class AnnotationSubstitutionProcessor extends SubstitutionProcessor {
     public ResolvedJavaMethod lookup(ResolvedJavaMethod method) {
         Delete deleteAnnotation = deleteAnnotations.get(method);
         if (deleteAnnotation != null) {
-            throw new UnsupportedFeatureException(deleteErrorMessage(method, deleteAnnotation, true));
+            throw new DeletedElementException(deleteErrorMessage(method, deleteAnnotation, true));
         }
         ResolvedJavaMethod substitution = methodSubstitutions.get(method);
         if (substitution != null) {
@@ -257,7 +258,7 @@ public class AnnotationSubstitutionProcessor extends SubstitutionProcessor {
          * The annotatedClass is never used directly, i.e., never wrapped in an AnalysisType. So we
          * need to ensure manually here that its static initializer runs.
          */
-        ClassInitializationFeature.singleton().forceInitializeHosted(annotatedClass);
+        classInitializationSupport.forceInitializeHosted(annotatedClass);
 
         Delete deleteAnnotation = lookupAnnotation(annotatedClass, Delete.class);
         Substitute substituteAnnotation = lookupAnnotation(annotatedClass, Substitute.class);
@@ -515,7 +516,9 @@ public class AnnotationSubstitutionProcessor extends SubstitutionProcessor {
             ResolvedJavaField field = metaAccess.lookupJavaField(f);
             ResolvedJavaField alias = fieldValueRecomputation(annotatedClass, field, field, f);
             if (!alias.equals(field)) {
-                register(fieldSubstitutions, field, null, alias);
+                ResolvedJavaField originalField = findOriginalField(f, originalClass, true);
+                guarantee(originalField == null || !(alias.isFinal() && !originalField.isFinal()), "a non-final field cannot be redeclared as final through substitution: %s", field);
+                register(fieldSubstitutions, field, originalField, alias);
             } else {
                 handleAnnotatedFieldInSubstitutionClass(f, originalClass);
             }
@@ -726,7 +729,7 @@ public class AnnotationSubstitutionProcessor extends SubstitutionProcessor {
         RecomputeFieldValue.Kind kind = RecomputeFieldValue.Kind.None;
         Class<?> targetClass = originalClass;
         String targetName = "";
-        boolean isFinal = false;
+        boolean isFinal = original.isFinal() && annotated.isFinal();
 
         if (recomputeAnnotation != null) {
             kind = recomputeAnnotation.kind();
@@ -741,7 +744,6 @@ public class AnnotationSubstitutionProcessor extends SubstitutionProcessor {
                 targetClass = imageClassLoader.findClassByName(recomputeAnnotation.declClassName());
             }
         }
-
         return new ComputedValueField(original, annotated, kind, targetClass, targetName, isFinal);
     }
 
@@ -897,7 +899,7 @@ public class AnnotationSubstitutionProcessor extends SubstitutionProcessor {
         } else if (element instanceof ResolvedJavaType) {
             result.append("type ").append(((ResolvedJavaType) element).toJavaName(true));
         } else {
-            throw VMError.shouldNotReachHere();
+            throw VMError.shouldNotReachHere("Unknown @Delete annotated element " + element);
         }
         result.append(" is reachable");
         if (message != null && !message.isEmpty()) {

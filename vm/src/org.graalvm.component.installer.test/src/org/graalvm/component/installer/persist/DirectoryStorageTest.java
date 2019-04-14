@@ -53,6 +53,7 @@ import org.graalvm.component.installer.TestBase;
 import org.graalvm.component.installer.model.ComponentInfo;
 import org.junit.After;
 import org.junit.AfterClass;
+import static org.junit.Assert.assertNotNull;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Rule;
@@ -351,7 +352,7 @@ public class DirectoryStorageTest extends TestBase {
         ComponentInfo info = new ComponentInfo("x", "y", "2.0");
         info.addRequiredValue("a", "b");
 
-        Properties props = storage.metaToProperties(info);
+        Properties props = DirectoryStorage.metaToProperties(info);
         assertEquals("x", props.getProperty(BundleConstants.BUNDLE_ID));
         assertEquals("y", props.getProperty(BundleConstants.BUNDLE_NAME));
         assertEquals("2.0", props.getProperty(BundleConstants.BUNDLE_VERSION));
@@ -421,4 +422,28 @@ public class DirectoryStorageTest extends TestBase {
         assertEquals(golden, lines);
     }
 
+    @Test
+    public void testAcceptLicense() throws Exception {
+        copyDir("list1", registryPath);
+        ComponentInfo info = storage.loadComponentMetadata("fastr");
+
+        storage.recordLicenseAccepted(info, "cafebabe", "This is a dummy license");
+        Path p = registryPath.resolve(SystemUtils.fromCommonString("licenses/cafebabe.accepted/org.graalvm.fastr"));
+        Path p2 = registryPath.resolve(SystemUtils.fromCommonString("licenses/cafebabe"));
+        assertTrue(Files.isReadable(p));
+        assertEquals(Arrays.asList("This is a dummy license"), Files.readAllLines(p2));
+    }
+
+    @Test
+    public void testLicenseAccepted1() throws Exception {
+        copyDir("list1", registryPath);
+        ComponentInfo info = storage.loadComponentMetadata("fastr");
+        ComponentInfo info2 = storage.loadComponentMetadata("ruby");
+
+        Path p = registryPath.resolve(SystemUtils.fromCommonString("licenses/cafebabe.accepted/org.graalvm.fastr"));
+        Files.createDirectories(p.getParent());
+        Files.write(p, Arrays.asList("ahoj"));
+        assertNotNull(storage.licenseAccepted(info, "cafebabe"));
+        assertNull(storage.licenseAccepted(info2, "cafebabe"));
+    }
 }

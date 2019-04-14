@@ -41,10 +41,11 @@ import java.util.function.BiConsumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 
+import com.oracle.svm.hosted.code.SharedRuntimeConfigurationBuilder;
 import org.graalvm.compiler.debug.DebugContext;
 import org.graalvm.nativeimage.Feature;
-import org.graalvm.nativeimage.RuntimeReflection;
 import org.graalvm.nativeimage.Feature.DuringAnalysisAccess;
+import org.graalvm.nativeimage.RuntimeReflection;
 
 import com.oracle.graal.pointsto.BigBang;
 import com.oracle.graal.pointsto.api.UnsafePartitionKind;
@@ -61,6 +62,7 @@ import com.oracle.svm.core.meta.SharedField;
 import com.oracle.svm.core.meta.SharedMethod;
 import com.oracle.svm.core.meta.SharedType;
 import com.oracle.svm.core.meta.SubstrateObjectConstant;
+import com.oracle.svm.hosted.analysis.Inflation;
 import com.oracle.svm.hosted.c.NativeLibraries;
 import com.oracle.svm.hosted.code.CompilationInfoSupport;
 import com.oracle.svm.hosted.image.AbstractBootImage;
@@ -145,9 +147,9 @@ public class FeatureImpl {
 
     abstract static class AnalysisAccessBase extends FeatureAccessImpl {
 
-        protected final BigBang bb;
+        protected final Inflation bb;
 
-        AnalysisAccessBase(FeatureHandler featureHandler, ImageClassLoader imageClassLoader, BigBang bb, DebugContext debugContext) {
+        AnalysisAccessBase(FeatureHandler featureHandler, ImageClassLoader imageClassLoader, Inflation bb, DebugContext debugContext) {
             super(featureHandler, imageClassLoader, debugContext);
             this.bb = bb;
         }
@@ -167,11 +169,8 @@ public class FeatureImpl {
 
     public static class DuringSetupAccessImpl extends AnalysisAccessBase implements Feature.DuringSetupAccess {
 
-        private final SVMHost hostVM;
-
-        DuringSetupAccessImpl(FeatureHandler featureHandler, ImageClassLoader imageClassLoader, BigBang bb, SVMHost hostVM, DebugContext debugContext) {
+        DuringSetupAccessImpl(FeatureHandler featureHandler, ImageClassLoader imageClassLoader, Inflation bb, DebugContext debugContext) {
             super(featureHandler, imageClassLoader, bb, debugContext);
-            this.hostVM = hostVM;
         }
 
         @Override
@@ -205,18 +204,16 @@ public class FeatureImpl {
         }
 
         public SVMHost getHostVM() {
-            return hostVM;
+            return bb.getHostVM();
         }
     }
 
     public static class BeforeAnalysisAccessImpl extends AnalysisAccessBase implements Feature.BeforeAnalysisAccess {
 
-        private final SVMHost hostVM;
         private final NativeLibraries nativeLibraries;
 
-        BeforeAnalysisAccessImpl(FeatureHandler featureHandler, ImageClassLoader imageClassLoader, BigBang bb, SVMHost hostVM, NativeLibraries nativeLibraries, DebugContext debugContext) {
+        BeforeAnalysisAccessImpl(FeatureHandler featureHandler, ImageClassLoader imageClassLoader, Inflation bb, NativeLibraries nativeLibraries, DebugContext debugContext) {
             super(featureHandler, imageClassLoader, bb, debugContext);
-            this.hostVM = hostVM;
             this.nativeLibraries = nativeLibraries;
         }
 
@@ -249,6 +246,10 @@ public class FeatureImpl {
 
         public void registerAsAccessed(AnalysisField aField) {
             aField.registerAsAccessed();
+        }
+
+        public void registerAsRead(AnalysisField aField) {
+            aField.registerAsRead(null);
         }
 
         @Override
@@ -313,7 +314,7 @@ public class FeatureImpl {
         }
 
         public SVMHost getHostVM() {
-            return hostVM;
+            return bb.getHostVM();
         }
 
         public void registerHierarchyForReflectiveInstantiation(Class<?> c) {
@@ -325,8 +326,8 @@ public class FeatureImpl {
 
         private boolean requireAnalysisIteration;
 
-        DuringAnalysisAccessImpl(FeatureHandler featureHandler, ImageClassLoader imageClassLoader, BigBang bb, SVMHost hostVM, NativeLibraries nativeLibraries, DebugContext debugContext) {
-            super(featureHandler, imageClassLoader, bb, hostVM, nativeLibraries, debugContext);
+        DuringAnalysisAccessImpl(FeatureHandler featureHandler, ImageClassLoader imageClassLoader, Inflation bb, NativeLibraries nativeLibraries, DebugContext debugContext) {
+            super(featureHandler, imageClassLoader, bb, nativeLibraries, debugContext);
         }
 
         @Override
@@ -342,13 +343,13 @@ public class FeatureImpl {
     }
 
     public static class AfterAnalysisAccessImpl extends AnalysisAccessBase implements Feature.AfterAnalysisAccess {
-        AfterAnalysisAccessImpl(FeatureHandler featureHandler, ImageClassLoader imageClassLoader, BigBang bb, DebugContext debugContext) {
+        AfterAnalysisAccessImpl(FeatureHandler featureHandler, ImageClassLoader imageClassLoader, Inflation bb, DebugContext debugContext) {
             super(featureHandler, imageClassLoader, bb, debugContext);
         }
     }
 
     public static class OnAnalysisExitAccessImpl extends AnalysisAccessBase implements Feature.OnAnalysisExitAccess {
-        OnAnalysisExitAccessImpl(FeatureHandler featureHandler, ImageClassLoader imageClassLoader, BigBang bb, DebugContext debugContext) {
+        OnAnalysisExitAccessImpl(FeatureHandler featureHandler, ImageClassLoader imageClassLoader, Inflation bb, DebugContext debugContext) {
             super(featureHandler, imageClassLoader, bb, debugContext);
         }
     }
@@ -452,9 +453,16 @@ public class FeatureImpl {
     }
 
     public static class BeforeCompilationAccessImpl extends CompilationAccessImpl implements Feature.BeforeCompilationAccess {
+        SharedRuntimeConfigurationBuilder runtimeBuilder;
+
         BeforeCompilationAccessImpl(FeatureHandler featureHandler, ImageClassLoader imageClassLoader, AnalysisUniverse aUniverse, HostedUniverse hUniverse, HostedMetaAccess hMetaAccess,
-                        NativeImageHeap heap, DebugContext debugContext) {
+                        NativeImageHeap heap, DebugContext debugContext, SharedRuntimeConfigurationBuilder runtime) {
             super(featureHandler, imageClassLoader, aUniverse, hUniverse, hMetaAccess, heap, debugContext);
+            runtimeBuilder = runtime;
+        }
+
+        public SharedRuntimeConfigurationBuilder getRuntimeBuilder() {
+            return runtimeBuilder;
         }
     }
 

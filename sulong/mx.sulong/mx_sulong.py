@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2016, 2018, Oracle and/or its affiliates.
+# Copyright (c) 2016, 2019, Oracle and/or its affiliates.
 #
 # All rights reserved.
 #
@@ -76,7 +76,8 @@ supportedLLVMVersions = [
     '4.0',
     '5.0',
     '6.0',
-    '7.0'
+    '7.0',
+    '8.0'
 ]
 
 # the basic LLVM dependencies for running the test cases and executing the mx commands
@@ -187,6 +188,7 @@ def _sulong_gate_runner(args, tasks):
         _sulong_gate_sulongsuite_unittest('Interop', tasks, args, testClasses='com.oracle.truffle.llvm.test.interop', tags=['interop', 'sulongBasic', 'sulongCoverage'])
         _sulong_gate_sulongsuite_unittest('Debug', tasks, args, testClasses='LLVMDebugTest', tags=['debug', 'sulongBasic', 'sulongCoverage'])
         _sulong_gate_sulongsuite_unittest('IRDebug', tasks, args, testClasses='LLVMIRDebugTest', tags=['irdebug', 'sulongBasic', 'sulongCoverage'])
+        _sulong_gate_sulongsuite_unittest('BitcodeFormat', tasks, args, testClasses='BitcodeFormatTest', tags=['bitcodeFormat', 'sulongBasic', 'sulongCoverage'])
         _sulong_gate_testsuite('Assembly', 'inlineassemblytests', tasks, args, testClasses='InlineAssemblyTest', tags=['assembly', 'sulongCoverage'])
         _sulong_gate_testsuite('Args', 'other', tasks, args, tags=['args', 'sulongMisc', 'sulongCoverage'], testClasses=['com.oracle.truffle.llvm.test.MainArgsTest'])
         _sulong_gate_testsuite('Callback', 'other', tasks, args, tags=['callback', 'sulongMisc', 'sulongCoverage'], testClasses=['com.oracle.truffle.llvm.test.CallbackTest'])
@@ -479,11 +481,6 @@ def extract_compiler_args(args, useDoubleDash=False):
                 remainder += [arg]
     return compilerArgs, remainder
 
-def runLLVM(args=None, out=None):
-    """uses Sulong to execute a LLVM IR file"""
-    vmArgs, sulongArgs = truffle_extract_VM_args(args)
-    return mx.run_java(getCommonOptions(False) + vmArgs + getClasspathOptions() + ["com.oracle.truffle.llvm.launcher.LLVMLauncher"] + sulongArgs, out=out)
-
 def getCommonOptions(withAssertion, lib_args=None):
     options = ['-Dgraal.TruffleCompilationExceptionsArePrinted=true',
         '-Dgraal.ExitVMOnException=true']
@@ -545,7 +542,7 @@ def getLLVMVersion(llvmProgram):
         return printLLVMVersion.group(3)
 
 # the makefiles do not check which version of clang they invoke
-clang_versions_need_optnone = ['5', '6', '7']
+clang_versions_need_optnone = ['5', '6', '7', '8']
 def getLLVMExplicitArgs(mainLLVMVersion):
     if mainLLVMVersion:
         for ver in clang_versions_need_optnone:
@@ -631,15 +628,25 @@ def findGCCProgram(gccProgram, optional=False):
     else:
         return installedProgram
 
-def getClasspathOptions():
+def getClasspathOptions(extra_dists=None):
     """gets the classpath of the Sulong distributions"""
-    return mx.get_runtime_jvm_args(['SULONG', 'SULONG_LAUNCHER'])
+    return mx.get_runtime_jvm_args(['SULONG', 'SULONG_LAUNCHER', 'TRUFFLE_NFI'] + (extra_dists or []))
 
 def ensureLLVMBinariesExist():
     """downloads the LLVM binaries if they have not been downloaded yet"""
     for llvmBinary in basicLLVMDependencies:
         if findLLVMProgram(llvmBinary) is None:
             raise Exception(llvmBinary + ' not found')
+
+
+def runLLVM(args=None, out=None, get_classpath_options=getClasspathOptions):
+    """uses Sulong to execute a LLVM IR file"""
+    vmArgs, sulongArgs = truffle_extract_VM_args(args)
+    dists = []
+    if "tools" in (s.name for s in mx.suites()):
+        dists.append('CHROMEINSPECTOR')
+    return mx.run_java(getCommonOptions(False) + vmArgs + get_classpath_options(dists) + ["com.oracle.truffle.llvm.launcher.LLVMLauncher"] + sulongArgs, out=out)
+
 
 _env_flags = []
 if 'CPPFLAGS' in os.environ:

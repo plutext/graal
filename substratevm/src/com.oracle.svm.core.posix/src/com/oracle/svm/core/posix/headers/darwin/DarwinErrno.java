@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2013, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,6 +24,7 @@
  */
 package com.oracle.svm.core.posix.headers.darwin;
 
+import com.oracle.svm.core.headers.Errno;
 import org.graalvm.nativeimage.Platform;
 import org.graalvm.nativeimage.Platforms;
 import org.graalvm.nativeimage.c.function.CFunction;
@@ -35,25 +36,25 @@ import com.oracle.svm.core.annotate.Uninterruptible;
 
 //Checkstyle: stop
 
-@Platforms(Platform.DARWIN.class)
+@Platforms(Platform.DARWIN_AND_JNI.class)
 class DarwinErrno {
 
-    @TargetClass(com.oracle.svm.core.posix.headers.Errno.class)
-    static final class Target_com_oracle_svm_core_posix_headers_Errno {
+    @TargetClass(Errno.class)
+    static final class Target_com_oracle_svm_core_headers_Errno {
         @Substitute
         @Uninterruptible(reason = "Called from uninterruptible code.")
         private static int errno() {
-            return Util_com_oracle_svm_core_posix_headers_Errno.__error().read();
+            return Util_com_oracle_svm_core_headers_Errno.__error().read();
         }
 
         @Substitute
         @Uninterruptible(reason = "Called from uninterruptible code.")
         public static void set_errno(int value) {
-            Util_com_oracle_svm_core_posix_headers_Errno.__error().write(value);
+            Util_com_oracle_svm_core_headers_Errno.__error().write(value);
         }
     }
 
-    static final class Util_com_oracle_svm_core_posix_headers_Errno {
+    static final class Util_com_oracle_svm_core_headers_Errno {
         @CFunction(transition = CFunction.Transition.NO_TRANSITION)
         static native CIntPointer __error();
     }

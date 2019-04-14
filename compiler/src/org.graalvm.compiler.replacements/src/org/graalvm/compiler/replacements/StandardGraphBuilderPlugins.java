@@ -33,8 +33,8 @@ import static jdk.vm.ci.code.MemoryBarriers.LOAD_STORE;
 import static jdk.vm.ci.code.MemoryBarriers.STORE_LOAD;
 import static jdk.vm.ci.code.MemoryBarriers.STORE_STORE;
 import static org.graalvm.compiler.nodes.NamedLocationIdentity.OFF_HEAP_LOCATION;
-import static org.graalvm.compiler.serviceprovider.GraalServices.Java11OrEarlier;
-import static org.graalvm.compiler.serviceprovider.GraalServices.Java8OrEarlier;
+import static org.graalvm.compiler.serviceprovider.JavaVersionUtil.Java11OrEarlier;
+import static org.graalvm.compiler.serviceprovider.JavaVersionUtil.Java8OrEarlier;
 
 import java.lang.reflect.Array;
 import java.lang.reflect.Field;
@@ -54,8 +54,6 @@ import org.graalvm.compiler.debug.GraalError;
 import org.graalvm.compiler.graph.Edges;
 import org.graalvm.compiler.graph.Node;
 import org.graalvm.compiler.graph.NodeList;
-import org.graalvm.compiler.java.IntegerExactOpSpeculation;
-import org.graalvm.compiler.java.IntegerExactOpSpeculation.IntegerExactOp;
 import org.graalvm.compiler.nodes.AbstractBeginNode;
 import org.graalvm.compiler.nodes.BeginNode;
 import org.graalvm.compiler.nodes.ConstantNode;
@@ -94,6 +92,7 @@ import org.graalvm.compiler.nodes.extended.BoxNode;
 import org.graalvm.compiler.nodes.extended.BranchProbabilityNode;
 import org.graalvm.compiler.nodes.extended.BytecodeExceptionNode.BytecodeExceptionKind;
 import org.graalvm.compiler.nodes.extended.GetClassNode;
+import org.graalvm.compiler.nodes.extended.GuardingNode;
 import org.graalvm.compiler.nodes.extended.JavaReadNode;
 import org.graalvm.compiler.nodes.extended.JavaWriteNode;
 import org.graalvm.compiler.nodes.extended.MembarNode;
@@ -125,13 +124,16 @@ import org.graalvm.compiler.replacements.nodes.ProfileBooleanNode;
 import org.graalvm.compiler.replacements.nodes.ReverseBytesNode;
 import org.graalvm.compiler.replacements.nodes.VirtualizableInvokeMacroNode;
 import org.graalvm.compiler.replacements.nodes.arithmetic.IntegerAddExactNode;
+import org.graalvm.compiler.replacements.nodes.arithmetic.IntegerAddExactOverflowNode;
 import org.graalvm.compiler.replacements.nodes.arithmetic.IntegerAddExactSplitNode;
-import org.graalvm.compiler.replacements.nodes.arithmetic.IntegerExactArithmeticNode;
 import org.graalvm.compiler.replacements.nodes.arithmetic.IntegerExactArithmeticSplitNode;
 import org.graalvm.compiler.replacements.nodes.arithmetic.IntegerMulExactNode;
+import org.graalvm.compiler.replacements.nodes.arithmetic.IntegerMulExactOverflowNode;
 import org.graalvm.compiler.replacements.nodes.arithmetic.IntegerMulExactSplitNode;
 import org.graalvm.compiler.replacements.nodes.arithmetic.IntegerSubExactNode;
+import org.graalvm.compiler.replacements.nodes.arithmetic.IntegerSubExactOverflowNode;
 import org.graalvm.compiler.replacements.nodes.arithmetic.IntegerSubExactSplitNode;
+import org.graalvm.compiler.serviceprovider.SpeculationReasonGroup;
 import org.graalvm.word.LocationIdentity;
 
 import jdk.vm.ci.code.BytecodePosition;
@@ -202,8 +204,24 @@ public class StandardGraphBuilderPlugins {
             public boolean apply(GraphBuilderContext b, ResolvedJavaMethod targetMethod, Receiver receiver) {
                 if (receiver.isConstant()) {
                     String s = snippetReflection.asObject(String.class, (JavaConstant) receiver.get().asConstant());
-                    b.addPush(JavaKind.Int, b.add(ConstantNode.forInt(s.hashCode())));
-                    return true;
+                    if (s != null) {
+                        b.addPush(JavaKind.Int, b.add(ConstantNode.forInt(s.hashCode())));
+                        return true;
+                    }
+                }
+                return false;
+            }
+        });
+        r.register1("intern", Receiver.class, new InvocationPlugin() {
+            @Override
+            public boolean apply(GraphBuilderContext b, ResolvedJavaMethod targetMethod, Receiver receiver) {
+                if (receiver.isConstant()) {
+                    String s = snippetReflection.asObject(String.class, (JavaConstant) receiver.get().asConstant());
+                    if (s != null) {
+                        JavaConstant interned = snippetReflection.forObject(s.intern());
+                        b.addPush(JavaKind.Object, b.add(ConstantNode.forConstant(interned, b.getMetaAccess(), b.getGraph())));
+                        return true;
+                    }
                 }
                 return false;
             }
@@ -554,16 +572,47 @@ public class StandardGraphBuilderPlugins {
         });
     }
 
-    private static ValueNode createIntegerExactArithmeticNode(ValueNode x, ValueNode y, SpeculationReason speculation, IntegerExactOp op) {
+    public enum IntegerExactOp {
+        INTEGER_ADD_EXACT,
+        INTEGER_INCREMENT_EXACT,
+        INTEGER_SUBTRACT_EXACT,
+        INTEGER_DECREMENT_EXACT,
+        INTEGER_MULTIPLY_EXACT
+    }
+
+    private static GuardingNode createIntegerExactArithmeticGuardNode(GraphBuilderContext b, ValueNode x, ValueNode y, IntegerExactOp op) {
+        LogicNode overflowCheck;
+        switch (op) {
+            case INTEGER_ADD_EXACT:
+            case INTEGER_INCREMENT_EXACT: {
+                overflowCheck = new IntegerAddExactOverflowNode(x, y);
+                break;
+            }
+            case INTEGER_SUBTRACT_EXACT:
+            case INTEGER_DECREMENT_EXACT: {
+                overflowCheck = new IntegerSubExactOverflowNode(x, y);
+                break;
+            }
+            case INTEGER_MULTIPLY_EXACT: {
+                overflowCheck = new IntegerMulExactOverflowNode(x, y);
+                break;
+            }
+            default:
+                throw GraalError.shouldNotReachHere("Unknown integer exact operation.");
+        }
+        return b.add(new FixedGuardNode(overflowCheck, DeoptimizationReason.ArithmeticException, DeoptimizationAction.InvalidateRecompile, true));
+    }
+
+    private static ValueNode createIntegerExactArithmeticNode(GraphBuilderContext b, ValueNode x, ValueNode y, IntegerExactOp op) {
         switch (op) {
             case INTEGER_ADD_EXACT:
             case INTEGER_INCREMENT_EXACT:
-                return new IntegerAddExactNode(x, y, speculation);
+                return new IntegerAddExactNode(x, y, createIntegerExactArithmeticGuardNode(b, x, y, op));
             case INTEGER_SUBTRACT_EXACT:
             case INTEGER_DECREMENT_EXACT:
-                return new IntegerSubExactNode(x, y, speculation);
+                return new IntegerSubExactNode(x, y, createIntegerExactArithmeticGuardNode(b, x, y, op));
             case INTEGER_MULTIPLY_EXACT:
-                return new IntegerMulExactNode(x, y, speculation);
+                return new IntegerMulExactNode(x, y, createIntegerExactArithmeticGuardNode(b, x, y, op));
             default:
                 throw GraalError.shouldNotReachHere("Unknown integer exact operation.");
         }
@@ -591,19 +640,7 @@ public class StandardGraphBuilderPlugins {
             IntegerExactArithmeticSplitNode split = b.addPush(kind, createIntegerExactSplit(x, y, exceptionEdge, op));
             split.setNext(b.add(new BeginNode()));
         } else {
-            SpeculationLog log = b.getGraph().getSpeculationLog();
-            if (log == null || (x.isConstant() && y.isConstant())) {
-                b.addPush(kind, createIntegerExactArithmeticNode(x, y, null, op));
-            } else {
-                SpeculationReason speculation = new IntegerExactOpSpeculation(b.getMethod(), op);
-                if (log.maySpeculate(speculation)) {
-                    b.addPush(kind, createIntegerExactArithmeticNode(x, y, speculation, op));
-                } else {
-                    BeginNode begin = b.add(new BeginNode());
-                    IntegerExactArithmeticNode node = (IntegerExactArithmeticNode) b.addPush(kind, createIntegerExactArithmeticNode(x, y, null, op));
-                    node.setAnchor(begin);
-                }
-            }
+            b.addPush(kind, createIntegerExactArithmeticNode(b, x, y, op));
         }
     }
 
@@ -612,7 +649,6 @@ public class StandardGraphBuilderPlugins {
         if (allowDeoptimization) {
             for (JavaKind kind : new JavaKind[]{JavaKind.Int, JavaKind.Long}) {
                 Class<?> type = kind.toJavaClass();
-
                 r.register1("decrementExact", type, new InvocationPlugin() {
                     @Override
                     public boolean apply(GraphBuilderContext b, ResolvedJavaMethod targetMethod, Receiver receiver, ValueNode x) {
@@ -630,7 +666,6 @@ public class StandardGraphBuilderPlugins {
                         return true;
                     }
                 });
-
                 r.register2("addExact", type, type, new InvocationPlugin() {
                     @Override
                     public boolean apply(GraphBuilderContext b, ResolvedJavaMethod targetMethod, Receiver receiver, ValueNode x, ValueNode y) {
@@ -638,7 +673,6 @@ public class StandardGraphBuilderPlugins {
                         return true;
                     }
                 });
-
                 r.register2("subtractExact", type, type, new InvocationPlugin() {
                     @Override
                     public boolean apply(GraphBuilderContext b, ResolvedJavaMethod targetMethod, Receiver receiver, ValueNode x, ValueNode y) {
@@ -1142,23 +1176,7 @@ public class StandardGraphBuilderPlugins {
         }
     }
 
-    private static final class DirectiveSpeculationReason implements SpeculationLog.SpeculationReason {
-        private final BytecodePosition pos;
-
-        private DirectiveSpeculationReason(BytecodePosition pos) {
-            this.pos = pos;
-        }
-
-        @Override
-        public int hashCode() {
-            return pos.hashCode();
-        }
-
-        @Override
-        public boolean equals(Object obj) {
-            return obj instanceof DirectiveSpeculationReason && ((DirectiveSpeculationReason) obj).pos.equals(this.pos);
-        }
-    }
+    private static final SpeculationReasonGroup DIRECTIVE_SPECULATIONS = new SpeculationReasonGroup("GraalDirective", BytecodePosition.class);
 
     private static void registerGraalDirectivesPlugins(InvocationPlugins plugins) {
         Registration r = new Registration(plugins, GraalDirectives.class);
@@ -1181,9 +1199,9 @@ public class StandardGraphBuilderPlugins {
         r.register0("deoptimizeAndInvalidateWithSpeculation", new InvocationPlugin() {
             @Override
             public boolean apply(GraphBuilderContext b, ResolvedJavaMethod targetMethod, Receiver receiver) {
-                GraalError.guarantee(b.getGraph().getSpeculationLog() != null, "A speculation log is need to use `deoptimizeAndInvalidateWithSpeculation`");
+                GraalError.guarantee(b.getGraph().getSpeculationLog() != null, "A speculation log is needed to use `deoptimizeAndInvalidateWithSpeculation`");
                 BytecodePosition pos = new BytecodePosition(null, b.getMethod(), b.bci());
-                DirectiveSpeculationReason reason = new DirectiveSpeculationReason(pos);
+                SpeculationReason reason = DIRECTIVE_SPECULATIONS.createSpeculationReason(pos);
                 Speculation speculation;
                 if (b.getGraph().getSpeculationLog().maySpeculate(reason)) {
                     speculation = b.getGraph().getSpeculationLog().speculate(reason);
@@ -1366,7 +1384,7 @@ public class StandardGraphBuilderPlugins {
                             b.add(new DeoptimizeNode(DeoptimizationAction.InvalidateReprofile, DeoptimizationReason.TransferToInterpreter));
                         } else if (falseCount == 0 || trueCount == 0) {
                             boolean expected = falseCount == 0;
-                            LogicNode condition = b.addWithInputs(
+                            LogicNode condition = b.add(
                                             IntegerEqualsNode.create(b.getConstantReflection(), b.getMetaAccess(), b.getOptions(), null, result, b.add(ConstantNode.forBoolean(!expected)),
                                                             NodeView.DEFAULT));
                             b.append(new FixedGuardNode(condition, DeoptimizationReason.UnreachedCode, DeoptimizationAction.InvalidateReprofile, true));

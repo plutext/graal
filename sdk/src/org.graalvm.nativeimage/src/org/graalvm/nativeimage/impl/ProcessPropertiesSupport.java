@@ -40,6 +40,8 @@
  */
 package org.graalvm.nativeimage.impl;
 
+import java.nio.file.Path;
+
 import org.graalvm.nativeimage.c.function.CEntryPointLiteral;
 
 public interface ProcessPropertiesSupport {
@@ -55,9 +57,13 @@ public interface ProcessPropertiesSupport {
 
     String setLocale(String category, String locale);
 
-    void destroy(long processID);
+    boolean destroy(long processID);
 
-    void destroyForcibly(long processID);
+    boolean destroyForcibly(long processID);
 
     boolean isAlive(long processID);
+
+    int waitForProcessExit(long processID);
+
+    void exec(Path executable, String[] args);
 }

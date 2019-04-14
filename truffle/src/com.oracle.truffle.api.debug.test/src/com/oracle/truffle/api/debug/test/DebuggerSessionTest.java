@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * The Universal Permissive License (UPL), Version 1.0
@@ -562,7 +562,7 @@ public class DebuggerSessionTest extends AbstractDebugTest {
         String sourceContent = "\n  relative source\nVarA";
         Source source = Source.newBuilder(ProxyLanguage.ID, sourceContent, "file").cached(false).build();
         String relativePath = "relative/test.file";
-        Path testSourcePath = Files.createTempDirectory("testPath");
+        Path testSourcePath = Files.createTempDirectory("testPath").toRealPath();
         Files.createDirectory(testSourcePath.resolve("relative"));
         Path filePath = testSourcePath.resolve(relativePath);
         Files.write(filePath, sourceContent.getBytes());
@@ -614,7 +614,7 @@ public class DebuggerSessionTest extends AbstractDebugTest {
         String sourceContent = "\n  relative source\nVarA";
         Source source = Source.newBuilder(ProxyLanguage.ID, sourceContent, "file").cached(false).build();
         String relativePath = "relative/test.file";
-        File zip = File.createTempFile("TestZip", ".zip");
+        File zip = File.createTempFile("TestZip", ".zip").getCanonicalFile();
         zip.deleteOnExit();
         try (ZipOutputStream out = new ZipOutputStream(new FileOutputStream(zip))) {
             ZipEntry e = new ZipEntry("src/" + relativePath);
@@ -685,7 +685,7 @@ public class DebuggerSessionTest extends AbstractDebugTest {
     public void testDebuggedSourcesCanBeReleasedRelative() throws IOException {
         String sourceContent = "\n  relative source\nVarA";
         String relativePath = "relative/test.file";
-        Path testSourcePath = Files.createTempDirectory("testPath");
+        Path testSourcePath = Files.createTempDirectory("testPath").toRealPath();
         Files.createDirectory(testSourcePath.resolve("relative"));
         Path filePath = testSourcePath.resolve(relativePath);
         Files.write(filePath, sourceContent.getBytes());
@@ -711,6 +711,20 @@ public class DebuggerSessionTest extends AbstractDebugTest {
                 return truffleSource.get();
             });
         }
+    }
+
+    @Test
+    @SuppressWarnings("try")
+    public void testSessionCount() {
+        Assert.assertEquals(0, tester.getDebugger().getSessionCount());
+        try (DebuggerSession s = tester.startSession()) {
+            Assert.assertEquals(1, tester.getDebugger().getSessionCount());
+            try (DebuggerSession s2 = tester.startSession()) {
+                Assert.assertEquals(2, tester.getDebugger().getSessionCount());
+            }
+            Assert.assertEquals(1, tester.getDebugger().getSessionCount());
+        }
+        Assert.assertEquals(0, tester.getDebugger().getSessionCount());
     }
 
     private static void deleteRecursively(Path path) throws IOException {

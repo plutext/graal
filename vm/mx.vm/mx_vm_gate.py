@@ -28,11 +28,14 @@
 import mx
 import mx_vm
 import mx_subst
+import mx_unittest
 
 import functools
 from mx_gate import Task
 
-from os.path import join, exists
+from os import environ
+from os.path import join, exists, dirname
+from tempfile import NamedTemporaryFile
 from contextlib import contextmanager
 
 _suite = mx.suite('vm')
@@ -51,6 +54,7 @@ class VmGateTasks:
     graalpython = 'graalpython'
     integration = 'integration'
     tools = 'tools'
+    libgraal = 'libgraal'
 
 
 def gate_body(args, tasks):
@@ -86,6 +90,51 @@ def gate_body(args, tasks):
         if t and mx_vm.has_component('Graal.Python', fatalIfMissing=True):
             pass
 
+    if mx_vm.has_component('LibGraal'):
+        libgraal_location = mx_vm.get_native_image_locations('LibGraal', 'jvmcicompiler')
+        if libgraal_location is None:
+            mx.warn("Skipping libgraal tests: no library enabled in the LibGraal component")
+        else:
+            extra_vm_arguments = ['-XX:+UseJVMCICompiler', '-XX:+UseJVMCINativeLibrary', '-XX:JVMCILibPath=' + dirname(libgraal_location)]
+            if args.extra_vm_argument:
+                extra_vm_arguments += args.extra_vm_argument
+            import mx_compiler
+
+            # run avrora on the GraalVM binary itself
+            with Task('LibGraal Compiler:GraalVM DaCapo-avrora', tasks, tags=[VmGateTasks.libgraal]) as t:
+                if t:
+                    mx.run([join(mx_vm.graalvm_home(), 'bin', 'java'), '-XX:+UseJVMCICompiler', '-XX:+UseJVMCINativeLibrary', '-jar', mx.library('DACAPO').get_path(True), 'avrora'])
+
+            with Task('LibGraal Compiler:CTW', tasks, tags=[VmGateTasks.libgraal]) as t:
+                if t:
+                    mx_compiler.ctw([
+                            '-DCompileTheWorld.Config=Inline=false CompilationFailureAction=ExitVM', '-esa', '-XX:+EnableJVMCI',
+                            '-DCompileTheWorld.MultiThreaded=true', '-Dgraal.InlineDuringParsing=false', '-Dgraal.TrackNodeSourcePosition=true',
+                            '-DCompileTheWorld.Verbose=false', '-XX:ReservedCodeCacheSize=300m',
+                        ], extra_vm_arguments)
+
+            mx_compiler.compiler_gate_benchmark_runner(tasks, extra_vm_arguments, prefix='LibGraal Compiler:')
+
+            with Task('LibGraal Truffle:unittest', tasks, tags=[VmGateTasks.libgraal]) as t:
+                if t:
+                    def _unittest_config_participant(config):
+                        vmArgs, mainClass, mainClassArgs = config
+                        newVmArgs = [arg for arg in vmArgs if arg != "-Dtruffle.TruffleRuntime=com.oracle.truffle.api.impl.DefaultTruffleRuntime"]
+                        return (newVmArgs, mainClass, mainClassArgs)
+                    mx_unittest.add_config_participant(_unittest_config_participant)
+                    excluded_tests = environ.get("TEST_LIBGRAAL_EXCLUDE")
+                    if excluded_tests:
+                        with NamedTemporaryFile(prefix='blacklist.', mode='w', delete=False) as fp:
+                            fp.file.writelines([l + '\n' for l in excluded_tests.split()])
+                            unittest_args = ["--blacklist", fp.name]
+                    else:
+                        unittest_args = []
+                    unittest_args = unittest_args + ["--enable-timing", "--verbose"]
+                    mx_unittest.unittest(unittest_args + extra_vm_arguments + ["-Dgraal.TruffleCompileImmediately=true", "-Dgraal.TruffleBackgroundCompilation=false", "truffle"])
+    else:
+        mx.warn("Skipping libgraal tests: component not enabled")
+
+    gate_substratevm(tasks)
     gate_sulong(tasks)
     gate_ruby(tasks)
     gate_python(tasks)
@@ -103,6 +152,23 @@ def graalvm_svm():
         with svm.extensions.native_image_context(common_args, hosted_assertions, native_image_cmd=native_image_cmd) as native_image:
             yield native_image
     return native_image_context, svm.extensions
+
+def gate_substratevm(tasks):
+    with Task('Run Truffle host interop tests on SVM', tasks, tags=[VmGateTasks.substratevm]) as t:
+        if t:
+            tests = ['ValueHostInteropTest', 'ValueHostConversionTest']
+            truffle_no_compilation = ['--tool:truffle', '-Dtruffle.TruffleRuntime=com.oracle.truffle.api.impl.DefaultTruffleRuntime']
+            truffle_dir = mx.suite('truffle').dir
+            args = ['--build-args'] + truffle_no_compilation + [
+                '-H:Features=com.oracle.truffle.api.test.polyglot.RegisterTestClassesForReflectionFeature',
+                '-H:ReflectionConfigurationFiles=' + truffle_dir + '/src/com.oracle.truffle.api.test/src/com/oracle/truffle/api/test/polyglot/reflection.json',
+                '-H:DynamicProxyConfigurationFiles=' + truffle_dir + '/src/com.oracle.truffle.api.test/src/com/oracle/truffle/api/test/polyglot/proxys.json',
+                '--'
+            ] + tests
+
+            native_image_context, svm = graalvm_svm()
+            with native_image_context(svm.IMAGE_ASSERTION_FLAGS) as native_image:
+                svm._native_unittest(native_image, args)
 
 def gate_sulong(tasks):
     with Task('Run SulongSuite tests as native-image', tasks, tags=[VmGateTasks.sulong]) as t:
@@ -129,15 +195,9 @@ def gate_sulong(tasks):
 def gate_ruby(tasks):
     with Task('Ruby', tasks, tags=[VmGateTasks.ruby]) as t:
         if t:
-            # Debug GR-9912 on Ruby gate runs. If debug_gr_9912 goes away the custom image building below is not required anymore and
-            # test_ruby can be called with the original graalvm ruby-launcher
-            debug_gr_9912 = 16
-            native_image_context, svm = graalvm_svm()
-            with native_image_context(svm.IMAGE_ASSERTION_FLAGS) as native_image:
-                ruby_bindir = join(mx_vm.graalvm_output(), 'jre', 'languages', 'ruby', 'bin')
-                ruby_image = native_image(['--language:ruby', '-H:Path=' + ruby_bindir, '-H:GreyToBlackObjectVisitorDiagnosticHistory=' + str(debug_gr_9912)])
-                truffleruby_suite = mx.suite('truffleruby')
-                truffleruby_suite.extensions.ruby_testdownstream_aot([ruby_image, 'spec', 'release'])
+            ruby = join(mx_vm.graalvm_output(), 'jre', 'languages', 'ruby', 'bin', 'truffleruby')
+            truffleruby_suite = mx.suite('truffleruby')
+            truffleruby_suite.extensions.ruby_testdownstream_aot([ruby, 'spec', 'release'])
 
 def gate_python(tasks):
     with Task('Python', tasks, tags=[VmGateTasks.python]) as t:

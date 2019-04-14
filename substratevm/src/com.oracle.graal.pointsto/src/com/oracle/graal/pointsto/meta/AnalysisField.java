@@ -33,7 +33,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import com.oracle.graal.pointsto.api.AnnotationAccess;
+import org.graalvm.util.GuardedAnnotationAccess;
 import com.oracle.graal.pointsto.api.DefaultUnsafePartition;
 import com.oracle.graal.pointsto.api.HostVM;
 import com.oracle.graal.pointsto.api.PointstoOptions;
@@ -99,7 +99,7 @@ public class AnalysisField implements ResolvedJavaField {
         this.wrapped = wrappedField;
         this.id = universe.nextFieldId.getAndIncrement();
 
-        readBy = PointstoOptions.TrackAccessChain.getValue(universe.getHostVM().options()) ? new ConcurrentHashMap<>() : null;
+        readBy = PointstoOptions.TrackAccessChain.getValue(universe.hostVM().options()) ? new ConcurrentHashMap<>() : null;
         writtenBy = new ConcurrentHashMap<>();
 
         declaringClass = universe.lookup(wrappedField.getDeclaringClass());
@@ -386,17 +386,17 @@ public class AnalysisField implements ResolvedJavaField {
 
     @Override
     public Annotation[] getAnnotations() {
-        return AnnotationAccess.getAnnotations(wrapped);
+        return GuardedAnnotationAccess.getAnnotations(wrapped);
     }
 
     @Override
     public Annotation[] getDeclaredAnnotations() {
-        return AnnotationAccess.getDeclaredAnnotations(wrapped);
+        return GuardedAnnotationAccess.getDeclaredAnnotations(wrapped);
     }
 
     @Override
     public <T extends Annotation> T getAnnotation(Class<T> annotationClass) {
-        return AnnotationAccess.getAnnotation(wrapped, annotationClass);
+        return GuardedAnnotationAccess.getAnnotation(wrapped, annotationClass);
     }
 
     @Override

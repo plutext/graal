@@ -1,10 +1,10 @@
 suite = {
-    "mxversion": "5.195.1",
+    "mxversion": "5.210.2",
     "name": "tools",
     "defaultLicense" : "GPLv2-CPE",
 
     "groupId" : "org.graalvm.tools",
-    "version" : "1.0.0-rc12",
+    "version" : "1.0.0-rc16",
     "release" : False,
     "url" : "http://openjdk.java.net/projects/graal",
     "developer" : {
@@ -142,21 +142,27 @@ suite = {
             }
         },
         "VISUALVM_COMMON" : {
-            "urls" : ["https://lafo.ssw.uni-linz.ac.at/pub/graal-external-deps/visualvm-644.tar.gz"],
-            "sha1" : "b42485ad882c4e3984556f01d9495cb48aa39465",
+            "urls" : ["https://lafo.ssw.uni-linz.ac.at/pub/graal-external-deps/visualvm-655.tar.gz"],
+            "sha1" : "5a5574f03b58465226166a638641a384b9f44445",
         },
         "VISUALVM_PLATFORM_SPECIFIC" : {
             "os_arch" : {
                 "linux" : {
                     "amd64" : {
-                        "urls" : ["https://lafo.ssw.uni-linz.ac.at/pub/graal-external-deps/visualvm-644-linux-amd64.tar.gz"],
-                        "sha1" : "14c32251990e8369f949c87e6e771dbf2dbc1055",
+                        "urls" : ["https://lafo.ssw.uni-linz.ac.at/pub/graal-external-deps/visualvm-655-linux-amd64.tar.gz"],
+                        "sha1" : "64f07398bac9897e9b8123edeaf5cf9ff19517b5",
                     }
                 },
                 "darwin" : {
                     "amd64" : {
-                        "urls" : ["https://lafo.ssw.uni-linz.ac.at/pub/graal-external-deps/visualvm-644-macosx-x86_64.tar.gz"],
-                        "sha1" : "d27d264ed4744c229a43b8987f96d2a9319f960b",
+                        "urls" : ["https://lafo.ssw.uni-linz.ac.at/pub/graal-external-deps/visualvm-655-macosx-x86_64.tar.gz"],
+                        "sha1" : "48da5fcf73bd85b257dbeb3ca033fd96e5ec2278",
+                    }
+                },
+                "windows" : {
+                    "amd64" : {
+                        "urls" : ["https://lafo.ssw.uni-linz.ac.at/pub/graal-external-deps/visualvm-655-windows-amd64.tar.gz"],
+                        "sha1" : "ddaec648e701a88bb673ac3a1a96d2453d91eaee",
                     }
                 },
             }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -340,9 +340,4 @@ public interface LIRGeneratorTool extends DiagnosticLIRGeneratorTool, ValueKindF
     default Value emitReadReturnAddress(Stamp wordStamp, int returnAddressSize) {
         return emitMove(StackSlot.get(getLIRKind(wordStamp), -returnAddressSize, true));
     }
-
-    default void emitThrow(@SuppressWarnings("unused") Value exception) {
-        throw GraalError.unimplemented("Throw is not implemented for this compiler backend");
-    }
-
 }

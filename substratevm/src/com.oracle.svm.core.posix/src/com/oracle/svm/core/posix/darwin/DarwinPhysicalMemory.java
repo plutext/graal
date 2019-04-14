@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -39,12 +39,12 @@ import org.graalvm.word.WordFactory;
 import com.oracle.svm.core.annotate.AutomaticFeature;
 import com.oracle.svm.core.heap.PhysicalMemory;
 import com.oracle.svm.core.log.Log;
-import com.oracle.svm.core.posix.headers.Errno;
+import com.oracle.svm.core.headers.Errno;
 import com.oracle.svm.core.posix.headers.Sysctl;
 import com.oracle.svm.core.posix.headers.darwin.DarwinSysctl;
 import com.oracle.svm.core.util.VMError;
 
-@Platforms(Platform.DARWIN.class)
+@Platforms(Platform.DARWIN_AND_JNI.class)
 class DarwinPhysicalMemory extends PhysicalMemory {
 
     static class PhysicalMemorySupportImpl implements PhysicalMemorySupport {

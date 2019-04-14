@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2012, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -38,13 +38,14 @@ import org.graalvm.compiler.nodes.spi.StampProvider;
 import org.graalvm.compiler.options.OptionValues;
 import org.graalvm.compiler.phases.util.Providers;
 import org.graalvm.compiler.word.WordTypes;
+import org.graalvm.nativeimage.ImageSingletons;
 
 import com.oracle.svm.core.FrameAccess;
 import com.oracle.svm.core.SubstrateOptions;
 import com.oracle.svm.core.config.ConfigurationValues;
 import com.oracle.svm.core.graal.GraalConfiguration;
-import com.oracle.svm.core.graal.amd64.SubstrateAMD64RegisterConfig;
 import com.oracle.svm.core.graal.code.SubstrateBackend;
+import com.oracle.svm.core.graal.code.SubstrateRegisterConfigFactory;
 import com.oracle.svm.core.graal.meta.RuntimeConfiguration;
 import com.oracle.svm.core.graal.meta.SubstrateCodeCacheProvider;
 import com.oracle.svm.core.graal.meta.SubstrateForeignCallsProvider;
@@ -52,10 +53,18 @@ import com.oracle.svm.core.graal.meta.SubstrateLoweringProvider;
 import com.oracle.svm.core.graal.meta.SubstrateRegisterConfig.ConfigKind;
 import com.oracle.svm.core.graal.meta.SubstrateSnippetReflectionProvider;
 import com.oracle.svm.core.graal.meta.SubstrateStampProvider;
+import com.oracle.svm.core.graal.word.SubstrateWordTypes;
 import com.oracle.svm.core.hub.DynamicHub;
+import com.oracle.svm.core.stack.JavaFrameAnchor;
+import com.oracle.svm.core.thread.VMThreads;
+import com.oracle.svm.core.util.VMError;
 import com.oracle.svm.hosted.SVMHost;
+import com.oracle.svm.hosted.c.NativeLibraries;
+import com.oracle.svm.hosted.c.info.AccessorInfo;
+import com.oracle.svm.hosted.c.info.StructFieldInfo;
 import com.oracle.svm.hosted.config.HybridLayout;
 import com.oracle.svm.hosted.meta.HostedMetaAccess;
+import com.oracle.svm.hosted.thread.VMThreadMTFeature;
 
 import jdk.vm.ci.code.CodeCacheProvider;
 import jdk.vm.ci.code.RegisterConfig;
@@ -69,17 +78,20 @@ public abstract class SharedRuntimeConfigurationBuilder {
     protected final MetaAccessProvider metaAccess;
     protected RuntimeConfiguration runtimeConfig;
     protected WordTypes wordTypes;
-    protected Function<Providers, SubstrateBackend> backendProvider;
+    protected final Function<Providers, SubstrateBackend> backendProvider;
+    protected final NativeLibraries nativeLibraries;
 
-    public SharedRuntimeConfigurationBuilder(OptionValues options, SVMHost hostVM, MetaAccessProvider metaAccess, Function<Providers, SubstrateBackend> backendProvider) {
+    public SharedRuntimeConfigurationBuilder(OptionValues options, SVMHost hostVM, MetaAccessProvider metaAccess, Function<Providers, SubstrateBackend> backendProvider,
+                    NativeLibraries nativeLibraries) {
         this.options = options;
         this.hostVM = hostVM;
         this.metaAccess = metaAccess;
         this.backendProvider = backendProvider;
+        this.nativeLibraries = nativeLibraries;
     }
 
     public SharedRuntimeConfigurationBuilder build() {
-        wordTypes = new WordTypes(metaAccess, FrameAccess.getWordKind());
+        wordTypes = new SubstrateWordTypes(metaAccess, FrameAccess.getWordKind());
         Providers p = createProviders(null, null, null, null, null, null, null, null);
         StampProvider stampProvider = createStampProvider(p);
         p = createProviders(null, null, null, null, null, null, stampProvider, null);
@@ -96,7 +108,8 @@ public abstract class SharedRuntimeConfigurationBuilder {
 
         EnumMap<ConfigKind, SubstrateBackend> backends = new EnumMap<>(ConfigKind.class);
         for (ConfigKind config : ConfigKind.values()) {
-            RegisterConfig registerConfig = new SubstrateAMD64RegisterConfig(config, metaAccess, ConfigurationValues.getTarget(), SubstrateOptions.UseStackBasePointer.getValue());
+            RegisterConfig registerConfig = ImageSingletons.lookup(SubstrateRegisterConfigFactory.class).newRegisterFactory(config, metaAccess, ConfigurationValues.getTarget(),
+                            SubstrateOptions.UseStackBasePointer.getValue());
             CodeCacheProvider codeCacheProvider = createCodeCacheProvider(registerConfig);
 
             Providers newProviders = createProviders(codeCacheProvider, constantReflection, constantFieldProvider, foreignCalls, lowerer, replacements, stampProvider,
@@ -160,6 +173,24 @@ public abstract class SharedRuntimeConfigurationBuilder {
             throw shouldNotReachHere(ex);
         }
 
-        runtimeConfig.setLazyState(vtableBaseOffset, vtableEntrySize, instanceOfBitsOffset, componentHubOffset);
+        int javaFrameAnchorLastSPOffset = findStructOffset(JavaFrameAnchor.class, "getLastJavaSP");
+        int javaFrameAnchorLastIPOffset = findStructOffset(JavaFrameAnchor.class, "getLastJavaIP");
+
+        int vmThreadStatusOffset = -1;
+        if (SubstrateOptions.MultiThreaded.getValue()) {
+            vmThreadStatusOffset = ImageSingletons.lookup(VMThreadMTFeature.class).offsetOf(VMThreads.StatusSupport.statusTL);
+        }
+
+        runtimeConfig.setLazyState(vtableBaseOffset, vtableEntrySize, instanceOfBitsOffset, componentHubOffset, javaFrameAnchorLastSPOffset, javaFrameAnchorLastIPOffset, vmThreadStatusOffset);
+    }
+
+    private int findStructOffset(Class<?> clazz, String accessorName) {
+        try {
+            AccessorInfo accessorInfo = (AccessorInfo) nativeLibraries.findElementInfo(metaAccess.lookupJavaMethod(clazz.getDeclaredMethod(accessorName)));
+            StructFieldInfo structFieldInfo = (StructFieldInfo) accessorInfo.getParent();
+            return structFieldInfo.getOffsetInfo().getProperty();
+        } catch (ReflectiveOperationException ex) {
+            throw VMError.shouldNotReachHere(ex);
+        }
     }
 }

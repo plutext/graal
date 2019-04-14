@@ -1,7 +1,7 @@
 # VM suite
 
 The VM suite allows you to build custom GraalVM distributions, as well as installable components.
-It defines a base GraalVM distribution that contains the JVMCI-enabled JDK, the Graal SDK, Truffle, and the GraalVM component installer.
+It defines a base GraalVM distribution that contains the JVMCI-enabled JDK, the GraalVM SDK, Truffle, and the GraalVM component installer.
 More components are added by dynamically importing additional suites.
 This can be done either by:
 1. running `mx --dynamicimports <suite...> build`
@@ -83,7 +83,7 @@ To override the default behavior, the `vm` suite defines the following `mx` argu
 ```
   --disable-libpolyglot         Disable the 'polyglot' library project
   --disable-polyglot            Disable the 'polyglot' launcher project
-  --force-bash-launchers        Force the use of bash launchers instead of native images.
+  --force-bash-launchers=...    Force the use of bash launchers instead of native images.
                                 This can be a comma-separated list of disabled launchers or `true` to disable all native launchers.
 ```
 And the following environment variables:

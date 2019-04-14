@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2009, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2009, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -75,7 +75,6 @@ import java.util.EnumSet;
 import org.graalvm.compiler.asm.Label;
 import org.graalvm.compiler.asm.amd64.AMD64Address.Scale;
 import org.graalvm.compiler.asm.amd64.AVXKind.AVXSize;
-import org.graalvm.compiler.core.common.NumUtil;
 import org.graalvm.compiler.core.common.calc.Condition;
 import org.graalvm.compiler.debug.GraalError;
 
@@ -683,7 +682,7 @@ public class AMD64Assembler extends AMD64BaseAssembler {
             emitImmediate(asm, size, imm);
             int nextInsnPos = asm.position();
             if (annotateImm && asm.codePatchingAnnotationConsumer != null) {
-                asm.codePatchingAnnotationConsumer.accept(new ImmediateOperandAnnotation(insnPos, immPos, nextInsnPos - immPos, nextInsnPos));
+                asm.codePatchingAnnotationConsumer.accept(new OperandDataAnnotation(insnPos, immPos, nextInsnPos - immPos, nextInsnPos));
             }
         }
 
@@ -700,7 +699,7 @@ public class AMD64Assembler extends AMD64BaseAssembler {
             emitImmediate(asm, size, imm);
             int nextInsnPos = asm.position();
             if (annotateImm && asm.codePatchingAnnotationConsumer != null) {
-                asm.codePatchingAnnotationConsumer.accept(new ImmediateOperandAnnotation(insnPos, immPos, nextInsnPos - immPos, nextInsnPos));
+                asm.codePatchingAnnotationConsumer.accept(new OperandDataAnnotation(insnPos, immPos, nextInsnPos - immPos, nextInsnPos));
             }
         }
     }
@@ -1759,6 +1758,14 @@ public class AMD64Assembler extends AMD64BaseAssembler {
         emitOperandHelper(dst, src, 0);
     }
 
+    public final void cmpb(Register dst, Register src) {
+        CMP.byteRmOp.emit(this, BYTE, dst, src);
+    }
+
+    public final void cmpw(Register dst, Register src) {
+        CMP.rmOp.emit(this, WORD, dst, src);
+    }
+
     public final void cmpl(Register dst, int imm32) {
         CMP.getMIOpcode(DWORD, isByte(imm32)).emit(this, DWORD, dst, imm32);
     }
@@ -1874,7 +1881,7 @@ public class AMD64Assembler extends AMD64BaseAssembler {
             // is the same however, seems to be rather unlikely case.
             // Note: use jccb() if label to be bound is very close to get
             // an 8-bit displacement
-            l.addPatchAt(position());
+            l.addPatchAt(position(), this);
             emitByte(0x0F);
             emitByte(0x80 | cc.getValue());
             emitInt(0);
@@ -1892,7 +1899,7 @@ public class AMD64Assembler extends AMD64BaseAssembler {
             emitByte(0x70 | cc.getValue());
             emitByte((int) ((disp - shortSize) & 0xFF));
         } else {
-            l.addPatchAt(position());
+            l.addPatchAt(position(), this);
             emitByte(0x70 | cc.getValue());
             emitByte(0);
         }
@@ -1921,7 +1928,7 @@ public class AMD64Assembler extends AMD64BaseAssembler {
             // the forward jump will not run beyond 256 bytes, use jmpb to
             // force an 8-bit displacement.
 
-            l.addPatchAt(position());
+            l.addPatchAt(position(), this);
             emitByte(0xE9);
             emitInt(0);
         }
@@ -1942,14 +1949,13 @@ public class AMD64Assembler extends AMD64BaseAssembler {
     public final void jmpb(Label l) {
         if (l.isBound()) {
             int shortSize = 2;
-            int entry = l.position();
-            assert isByte((entry - position()) + shortSize) : "Dispacement too large for a short jmp";
-            long offs = entry - position();
+            // Displacement is relative to byte just after jmpb instruction
+            int displacement = l.position() - position() - shortSize;
+            GraalError.guarantee(isByte(displacement), "Displacement too large to be encoded as a byte: %d", displacement);
             emitByte(0xEB);
-            emitByte((int) ((offs - shortSize) & 0xFF));
+            emitByte(displacement & 0xFF);
         } else {
-
-            l.addPatchAt(position());
+            l.addPatchAt(position(), this);
             emitByte(0xEB);
             emitByte(0);
         }
@@ -2015,7 +2021,7 @@ public class AMD64Assembler extends AMD64BaseAssembler {
         emitInt(imm32);
         int nextInsnPos = position();
         if (annotateImm && codePatchingAnnotationConsumer != null) {
-            codePatchingAnnotationConsumer.accept(new ImmediateOperandAnnotation(insnPos, immPos, nextInsnPos - immPos, nextInsnPos));
+            codePatchingAnnotationConsumer.accept(new OperandDataAnnotation(insnPos, immPos, nextInsnPos - immPos, nextInsnPos));
         }
     }
 
@@ -2213,6 +2219,13 @@ public class AMD64Assembler extends AMD64BaseAssembler {
         prefix(dst, src);
         emitByte(0x89);
         emitOperandHelper(src, dst, 0);
+    }
+
+    public final void movw(Register dst, AMD64Address src) {
+        emitByte(0x66);
+        prefix(src, dst);
+        emitByte(0x8B);
+        emitOperandHelper(dst, src, 0);
     }
 
     public final void movzbl(Register dst, AMD64Address src) {
@@ -3094,7 +3107,7 @@ public class AMD64Assembler extends AMD64BaseAssembler {
         emitLong(imm64);
         int nextInsnPos = position();
         if (annotateImm && codePatchingAnnotationConsumer != null) {
-            codePatchingAnnotationConsumer.accept(new ImmediateOperandAnnotation(insnPos, immPos, nextInsnPos - immPos, nextInsnPos));
+            codePatchingAnnotationConsumer.accept(new OperandDataAnnotation(insnPos, immPos, nextInsnPos - immPos, nextInsnPos));
         }
     }
 
@@ -3238,6 +3251,19 @@ public class AMD64Assembler extends AMD64BaseAssembler {
         emitModRM(5, dst);
     }
 
+    public final void sarq(Register dst, int imm8) {
+        assert isShiftCount(imm8 >> 1) : "illegal shift count";
+        prefixq(dst);
+        if (imm8 == 1) {
+            emitByte(0xD1);
+            emitModRM(7, dst);
+        } else {
+            emitByte(0xC1);
+            emitModRM(7, dst);
+            emitByte(imm8);
+        }
+    }
+
     public final void sbbq(Register dst, Register src) {
         SBB.rmOp.emit(this, QWORD, dst, src);
     }
@@ -3369,9 +3395,7 @@ public class AMD64Assembler extends AMD64BaseAssembler {
              * Since a wrongly patched short branch can potentially lead to working but really bad
              * behaving code we should always fail with an exception instead of having an assert.
              */
-            if (!NumUtil.isByte(imm8)) {
-                throw new InternalError("branch displacement out of range: " + imm8);
-            }
+            GraalError.guarantee(isByte(imm8), "Displacement too large to be encoded as a byte: %d", imm8);
             emitByte(imm8, branch + 1);
 
         } else {

@@ -59,12 +59,12 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
-import com.oracle.svm.core.OS;
 import org.graalvm.collections.EconomicSet;
 import org.graalvm.compiler.word.Word;
 import org.graalvm.nativeimage.Platform;
 import org.graalvm.nativeimage.Platforms;
 
+import com.oracle.svm.core.OS;
 import com.oracle.svm.core.util.InterruptImageBuilding;
 import com.oracle.svm.core.util.VMError;
 
@@ -100,7 +100,7 @@ public final class ImageClassLoader {
         ArrayList<String> classpathFiltered = new ArrayList<>(classpathAll.length);
         classpathFiltered.addAll(Arrays.asList(classpathAll));
 
-        /* If the Graal SDK is on the boot class path, and it contains annotated types. */
+        /* If the GraalVM SDK is on the boot class path, and it contains annotated types. */
         final String sunBootClassPath = System.getProperty("sun.boot.class.path");
         if (sunBootClassPath != null) {
             for (String s : sunBootClassPath.split(File.pathSeparator)) {
@@ -236,6 +236,8 @@ public final class ImageClassLoader {
 
     private void initAllClasses(final Path root, Set<Path> excludes, ForkJoinPool executor) {
         FileVisitor<Path> visitor = new SimpleFileVisitor<Path>() {
+            private final char fileSystemSeparatorChar = root.getFileSystem().getSeparator().charAt(0);
+
             @Override
             public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
                 if (excludes.contains(dir)) {
@@ -253,7 +255,7 @@ public final class ImageClassLoader {
                     String fileName = root.relativize(file).toString();
                     if (fileName.endsWith(CLASS_EXTENSION)) {
                         String unversionedClassName = unversionedFileName(fileName);
-                        String className = curtail(unversionedClassName, CLASS_EXTENSION_LENGTH).replace('/', '.');
+                        String className = curtail(unversionedClassName, CLASS_EXTENSION_LENGTH).replace(fileSystemSeparatorChar, '.');
                         try {
                             Class<?> systemClass = forName(className);
                             if (includedInPlatform(systemClass)) {
@@ -361,7 +363,7 @@ public final class ImageClassLoader {
                 }
             }
             return forName(name);
-        } catch (ClassNotFoundException ex) {
+        } catch (ClassNotFoundException | NoClassDefFoundError ex) {
             if (failIfClassMissing) {
                 throw shouldNotReachHere("class " + name + " not found");
             }

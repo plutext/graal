@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2019, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -32,14 +32,13 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Arrays;
-import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
 
 import org.graalvm.nativeimage.Feature;
 import org.graalvm.nativeimage.Platform;
 
 import com.oracle.svm.core.util.UserError;
-import com.oracle.svm.hosted.FeatureImpl.BeforeImageWriteAccessImpl;
 import com.oracle.svm.hosted.NativeImageOptions;
 
 public class PolyglotNativeAPIFeature implements Feature {
@@ -53,7 +52,7 @@ public class PolyglotNativeAPIFeature implements Feature {
 
     @Override
     public void afterImageWrite(AfterImageWriteAccess access) {
-        Collection<String> headerFiles = Arrays.asList("polyglot_types.h", "polyglot_isolate.h");
+        List<String> headerFiles = Collections.singletonList("polyglot_types.h");
         Path imagePath = access.getImagePath();
         headerFiles.forEach(headerFile -> {
             Path source = Paths.get(System.getProperty("org.graalvm.polyglot.nativeapi.libraryPath"), headerFile);
@@ -64,7 +63,7 @@ public class PolyglotNativeAPIFeature implements Feature {
                 throw new RuntimeException(e);
             }
         });
-        if (Platform.includedIn(Platform.DARWIN.class)) {
+        if (Platform.includedIn(Platform.DARWIN_AND_JNI.class)) {
             // on Darwin, change the `id` install name
             String id = System.getProperty("org.graalvm.polyglot.install_name_id");
             if (id == null) {
@@ -91,14 +90,5 @@ public class PolyglotNativeAPIFeature implements Feature {
                 }
             }
         }
-    }
-
-    @Override
-    public void beforeImageWrite(BeforeImageWriteAccess access) {
-        ((BeforeImageWriteAccessImpl) access).registerLinkerInvocationTransformer(li -> {
-            li.addInputFile(Paths.get(System.getProperty("org.graalvm.polyglot.nativeapi.nativeLibraryPath"), "polyglot-nativeapi.o").toString());
-            return li;
-        });
-
     }
 }

@@ -204,41 +204,58 @@ public final class InspectorDebugger extends DebuggerDomain {
 
     @Override
     public Params getPossibleBreakpoints(Location start, Location end, boolean restrictToFunction) throws CommandProcessException {
+        if (start == null) {
+            throw new CommandProcessException("Start location required.");
+        }
         int scriptId = start.getScriptId();
-        if (scriptId != end.getScriptId()) {
+        if (end != null && scriptId != end.getScriptId()) {
             throw new CommandProcessException("Different location scripts: " + scriptId + ", " + end.getScriptId());
         }
         Script script = slh.getScript(scriptId);
         if (script == null) {
             throw new CommandProcessException("Unknown scriptId: " + scriptId);
         }
-        Source source = script.getSource();
-        int l1 = start.getLine();
-        int c1 = start.getColumn();
-        if (c1 <= 0) {
-            c1 = -1;
-        }
-        int l2;
-        if (source.hasCharacters()) {
-            int lc = source.getLineCount();
-            if (end.getLine() > lc) {
-                l2 = lc;
-            } else {
-                l2 = end.getLine();
-            }
-        } else {
-            l2 = end.getLine();
-        }
-        int c2 = end.getColumn();
-        if (c2 <= 0) {
-            c2 = -1;
-        }
-        SourceSection range = source.createSection(l1, c1, l2, c2);
-        Iterable<SourceSection> locations = SuspendableLocationFinder.findSuspendableLocations(range, restrictToFunction, ds, context.getEnv());
         JSONObject json = new JSONObject();
         JSONArray arr = new JSONArray();
-        for (SourceSection ss : locations) {
-            arr.put(new Location(scriptId, ss.getStartLine(), ss.getStartColumn()).toJSON());
+        Source source = script.getSource();
+        if (source.hasCharacters() && source.getLength() > 0) {
+            int l1 = start.getLine();
+            int c1 = start.getColumn();
+            if (c1 <= 0) {
+                c1 = -1;
+            }
+            int l2;
+            int c2;
+            if (end != null) {
+                if (source.hasCharacters()) {
+                    int lc = source.getLineCount();
+                    if (end.getLine() > lc) {
+                        l2 = lc;
+                    } else {
+                        l2 = end.getLine();
+                    }
+                } else {
+                    l2 = end.getLine();
+                }
+                c2 = end.getColumn();
+                if (c2 <= 0) {
+                    c2 = -1;
+                }
+            } else {
+                l2 = l1;
+                if (c1 == -1) {
+                    c2 = -1;
+                } else if (source.hasCharacters()) {
+                    c2 = source.getLineLength(l2);
+                } else {
+                    c2 = c1 + 1;
+                }
+            }
+            SourceSection range = source.createSection(l1, c1, l2, c2);
+            Iterable<SourceSection> locations = SuspendableLocationFinder.findSuspendableLocations(range, restrictToFunction, ds, context.getEnv());
+            for (SourceSection ss : locations) {
+                arr.put(new Location(scriptId, ss.getStartLine(), ss.getStartColumn()).toJSON());
+            }
         }
         json.put("locations", arr);
         return new Params(json);
@@ -361,6 +378,7 @@ public final class InspectorDebugger extends DebuggerDomain {
             String scopeType = "block";
             boolean wasFunction = false;
             SourceSection functionSourceSection = null;
+            DebugValue thisValue = null;
             if (dscope == null) {
                 functionSourceSection = sourceSection;
             }
@@ -370,6 +388,7 @@ public final class InspectorDebugger extends DebuggerDomain {
                 } else if (dscope.isFunctionScope()) {
                     scopeType = "local";
                     functionSourceSection = dscope.getSourceSection();
+                    thisValue = dscope.getReceiver();
                     wasFunction = true;
                 }
                 if (dscope.isFunctionScope() || dscope.getDeclaredValues().iterator().hasNext()) {
@@ -399,8 +418,14 @@ public final class InspectorDebugger extends DebuggerDomain {
                 returnObj = context.getRemoteObjectsHandler().getRemote(returnValue);
             }
             SuspendAnchor anchor = (depthAll == 0) ? topAnchor : SuspendAnchor.BEFORE;
+            RemoteObject thisObj;
+            if (thisValue != null) {
+                thisObj = context.getRemoteObjectsHandler().getRemote(thisValue);
+            } else {
+                thisObj = RemoteObject.createNullObject(context.getEnv(), frame.getLanguage());
+            }
             CallFrame cf = new CallFrame(frame, depth++, script, sourceSection, anchor, functionSourceSection,
-                            null, returnObj, scopes.toArray(new Scope[scopes.size()]));
+                            thisObj, returnObj, scopes.toArray(new Scope[scopes.size()]));
             cfs.add(cf);
         }
         return cfs.toArray(new CallFrame[cfs.size()]);
@@ -522,7 +547,7 @@ public final class InspectorDebugger extends DebuggerDomain {
                         if (value == null) {
                             String errorMessage = getEvalNonInteractiveMessage();
                             ExceptionDetails exceptionDetails = new ExceptionDetails(errorMessage);
-                            json.put("exceptionDetails", exceptionDetails.createJSON(context));
+                            json.put("exceptionDetails", exceptionDetails.createJSON(context, generatePreview));
                             JSONObject err = new JSONObject();
                             err.putOpt("value", errorMessage);
                             err.putOpt("type", "string");
@@ -532,7 +557,7 @@ public final class InspectorDebugger extends DebuggerDomain {
                         value = cf.getFrame().eval(expression);
                     }
                     if (value != null) {
-                        RemoteObject ro = new RemoteObject(value, context.getErr());
+                        RemoteObject ro = new RemoteObject(value, generatePreview, context);
                         context.getRemoteObjectsHandler().register(ro);
                         json.put("result", ro.toJSON());
                     }
@@ -542,10 +567,10 @@ public final class InspectorDebugger extends DebuggerDomain {
                 @Override
                 public JSONObject processException(DebugException dex) {
                     JSONObject json = new JSONObject();
-                    InspectorRuntime.fillExceptionDetails(json, dex, context);
+                    InspectorRuntime.fillExceptionDetails(json, dex, context, generatePreview);
                     DebugValue exceptionObject = dex.getExceptionObject();
                     if (exceptionObject != null) {
-                        RemoteObject ro = context.createAndRegister(exceptionObject);
+                        RemoteObject ro = context.createAndRegister(exceptionObject, generatePreview);
                         json.put("result", ro.toJSON());
                     } else {
                         JSONObject err = new JSONObject();
@@ -572,6 +597,10 @@ public final class InspectorDebugger extends DebuggerDomain {
             DebugValue var = debugScope.getDeclaredValue(name);
             if (var != null) {
                 return var;
+            }
+            DebugValue receiver = debugScope.getReceiver();
+            if (receiver != null && name.equals(receiver.getName())) {
+                return receiver;
             }
         }
         return null;
@@ -644,10 +673,19 @@ public final class InspectorDebugger extends DebuggerDomain {
                         DebugScope debugScope = scope.getObject().getScope();
                         DebugValue debugValue = debugScope.getDeclaredValue(variableName);
                         Pair<DebugValue, Object> evaluatedValue = susp.lastEvaluatedValue.getAndSet(null);
-                        if (evaluatedValue != null && Objects.equals(evaluatedValue.getRight(), newValue.getPrimitiveValue())) {
-                            debugValue.set(evaluatedValue.getLeft());
-                        } else {
-                            context.setValue(debugValue, newValue);
+                        try {
+                            if (evaluatedValue != null && Objects.equals(evaluatedValue.getRight(), newValue.getPrimitiveValue())) {
+                                debugValue.set(evaluatedValue.getLeft());
+                            } else {
+                                context.setValue(debugValue, newValue);
+                            }
+                        } catch (DebugException ex) {
+                            PrintWriter err = context.getErr();
+                            if (err != null) {
+                                err.println("set of " + debugValue.getName() + " has caused " + ex);
+                                ex.printStackTrace(err);
+                            }
+                            throw ex;
                         }
                     }
                     return null;
@@ -692,8 +730,8 @@ public final class InspectorDebugger extends DebuggerDomain {
         }
     }
 
-    public static boolean sourceMatchesBlackboxPatterns(Source source, Pattern[] patterns) {
-        String uri = ScriptsHandler.getNiceStringFromURI(source.getURI());
+    public boolean sourceMatchesBlackboxPatterns(Source source, Pattern[] patterns) {
+        String uri = slh.getSourceURL(source);
         for (Pattern pattern : patterns) {
             // Check whether pattern corresponds to:
             // 1) the name of a file
@@ -873,9 +911,13 @@ public final class InspectorDebugger extends DebuggerDomain {
                     executables = null;
                     synchronized (suspendLock) {
                         if (!running && suspendThreadExecutables.isEmpty()) {
-                            try {
-                                suspendLock.wait();
-                            } catch (InterruptedException ex) {
+                            if (context.isSynchronous()) {
+                                running = true;
+                            } else {
+                                try {
+                                    suspendLock.wait();
+                                } catch (InterruptedException ex) {
+                                }
                             }
                         }
                         if (!suspendThreadExecutables.isEmpty()) {
@@ -967,7 +1009,7 @@ public final class InspectorDebugger extends DebuggerDomain {
             DebugValue exceptionObject = exception.getExceptionObject();
             JSONObject data;
             if (exceptionObject != null) {
-                RemoteObject remoteObject = context.createAndRegister(exceptionObject);
+                RemoteObject remoteObject = context.createAndRegister(exceptionObject, false);
                 data = remoteObject.toJSON();
             } else {
                 data = new JSONObject();

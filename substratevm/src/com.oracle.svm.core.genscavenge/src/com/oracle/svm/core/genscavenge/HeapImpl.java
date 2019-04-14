@@ -31,6 +31,10 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import javax.management.MBeanNotificationInfo;
+import javax.management.NotificationEmitter;
+import javax.management.NotificationFilter;
+import javax.management.NotificationListener;
 import javax.management.ObjectName;
 
 import org.graalvm.compiler.api.replacements.Fold;
@@ -274,12 +278,13 @@ public class HeapImpl extends Heap {
 
     /** Allocation is disallowed if ... */
     @Override
+    @Uninterruptible(reason = "Called from uninterruptible code.", mayBeInlined = true)
     public boolean isAllocationDisallowed() {
         /*
          * This method exists because Heap is the place clients should ask this question, and to
          * aggregate all the reasons allocation might be disallowed.
          */
-        return (NoAllocationVerifier.isActive() || getGCImpl().collectionInProgress.getState());
+        return NoAllocationVerifier.isActive() || gcImpl.collectionInProgress.getState();
     }
 
     /** A guard to place before an allocation, giving the call site and the allocation type. */
@@ -315,11 +320,11 @@ public class HeapImpl extends Heap {
         }
     }
 
-    public Object promoteObject(Object original) {
+    public Object promoteObject(Object original, Pointer objRef, int offset, boolean compressed) {
         final Log trace = Log.noopLog().string("[HeapImpl.promoteObject:").string("  original: ").object(original);
 
         final OldGeneration oldGen = getOldGeneration();
-        final Object result = oldGen.promoteObject(original);
+        final Object result = oldGen.promoteObject(original, objRef, offset, compressed);
 
         trace.string("  result: ").object(result).string("]").newline();
         return result;
@@ -710,7 +715,7 @@ public class HeapImpl extends Heap {
  * memory usage, the other kind of memory will still be walked. If someone asks for both the heap
  * memory usage <em>and</em> the non-heap memory usage, all the memory will be walked twice.
  */
-final class HeapImplMemoryMXBean implements MemoryMXBean {
+final class HeapImplMemoryMXBean implements MemoryMXBean, NotificationEmitter {
 
     /** Constant for the {@link MemoryUsage} constructor. */
     static final long UNDEFINED_MEMORY_USAGE = -1L;
@@ -765,6 +770,23 @@ final class HeapImplMemoryMXBean implements MemoryMXBean {
     @Override
     public void gc() {
         System.gc();
+    }
+
+    @Override
+    public void removeNotificationListener(NotificationListener listener, NotificationFilter filter, Object handback) {
+    }
+
+    @Override
+    public void addNotificationListener(NotificationListener listener, NotificationFilter filter, Object handback) {
+    }
+
+    @Override
+    public void removeNotificationListener(NotificationListener listener) {
+    }
+
+    @Override
+    public MBeanNotificationInfo[] getNotificationInfo() {
+        return new MBeanNotificationInfo[0];
     }
 }
 

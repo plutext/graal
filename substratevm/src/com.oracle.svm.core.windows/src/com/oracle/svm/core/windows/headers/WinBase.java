@@ -47,6 +47,8 @@ import org.graalvm.word.WordBase;
 @Platforms(Platform.WINDOWS.class)
 public class WinBase {
 
+    public static final int MAX_PATH = 260;
+
     /**
      * Windows opaque Handle type
      */
@@ -322,9 +324,47 @@ public class WinBase {
     public static native Pointer LoadLibraryExA(PointerBase lpFileName, int dummy, int flags);
 
     /**
+     * FreeLibrary
+     */
+    @CFunction(transition = Transition.NO_TRANSITION)
+    public static native void FreeLibrary(PointerBase pointer);
+
+    /**
      * SetDllDirectoryA
      */
     @CFunction(transition = Transition.NO_TRANSITION)
     public static native boolean SetDllDirectoryA(PointerBase lpPathName);
 
+    @CStruct(addStructKeyword = false)
+    public interface MEMORY_BASIC_INFORMATION extends PointerBase {
+        @CField
+        Pointer BaseAddress();
+
+        @CField
+        Pointer AllocationBase();
+
+        @CField
+        int AllocationProtect();
+
+        @CField
+        UnsignedWord RegionSize();
+
+        @CField
+        int State();
+
+        @CField
+        int Protect();
+
+        @CField
+        int Type();
+    }
+
+    @CFunction(transition = Transition.NO_TRANSITION)
+    public static native UnsignedWord VirtualQuery(PointerBase lpAddress, MEMORY_BASIC_INFORMATION lpBuffer, UnsignedWord dwLength);
+
+    @CFunction(transition = Transition.NO_TRANSITION)
+    public static native int GetVersion();
+
+    @CFunction(transition = Transition.NO_TRANSITION)
+    public static native int GetCurrentDirectoryA(long nBufferLength, CCharPointer lpBuffer);
 }

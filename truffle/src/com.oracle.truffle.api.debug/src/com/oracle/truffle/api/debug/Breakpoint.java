@@ -47,6 +47,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 import com.oracle.truffle.api.Assumption;
 import com.oracle.truffle.api.CallTarget;
@@ -66,6 +67,8 @@ import com.oracle.truffle.api.instrumentation.ExecutionEventNodeFactory;
 import com.oracle.truffle.api.instrumentation.SourceFilter;
 import com.oracle.truffle.api.instrumentation.SourceSectionFilter;
 import com.oracle.truffle.api.instrumentation.TruffleInstrument;
+import com.oracle.truffle.api.interop.InteropLibrary;
+import com.oracle.truffle.api.interop.UnsupportedMessageException;
 import com.oracle.truffle.api.nodes.ControlFlowException;
 import com.oracle.truffle.api.nodes.DirectCallNode;
 import com.oracle.truffle.api.nodes.ExecutableNode;
@@ -159,6 +162,7 @@ public class Breakpoint {
         static final Kind[] VALUES = values();
     }
 
+    private static final InteropLibrary INTEROP = InteropLibrary.getFactory().getUncached();
     private static final Breakpoint BUILDER_INSTANCE = new Breakpoint();
 
     private final SuspendAnchor suspendAnchor;
@@ -185,7 +189,7 @@ public class Breakpoint {
     private volatile Assumption conditionExistsUnchanged;
 
     private volatile EventBinding<? extends ExecutionEventNodeFactory> breakpointBinding;
-    private EventBinding<?> sourceBinding;
+    private final AtomicReference<EventBinding<?>> sourceBinding = new AtomicReference<>();
 
     Breakpoint(BreakpointLocation key, SuspendAnchor suspendAnchor) {
         this(key, suspendAnchor, false, null, null);
@@ -346,9 +350,9 @@ public class Breakpoint {
     public synchronized void dispose() {
         if (!disposed) {
             setEnabled(false);
-            if (sourceBinding != null) {
-                sourceBinding.dispose();
-                sourceBinding = null;
+            final EventBinding<?> binding = sourceBinding.getAndSet(null);
+            if (binding != null) {
+                binding.dispose();
             }
             for (DebuggerSession session : sessions) {
                 session.disposeBreakpoint(this);
@@ -500,24 +504,26 @@ public class Breakpoint {
         }
     }
 
-    synchronized boolean install(DebuggerSession d, boolean failOnError) {
-        if (disposed) {
-            if (failOnError) {
-                throw new IllegalArgumentException("Cannot install breakpoint, it is disposed already.");
-            } else {
-                return false;
+    boolean install(DebuggerSession d, boolean failOnError) {
+        synchronized (this) {
+            if (disposed) {
+                if (failOnError) {
+                    throw new IllegalArgumentException("Cannot install breakpoint, it is disposed already.");
+                } else {
+                    return false;
+                }
             }
-        }
-        if (this.sessions.contains(d)) {
-            if (failOnError) {
-                throw new IllegalStateException("Breakpoint is already installed in the session.");
-            } else {
-                return true;
+            if (this.sessions.contains(d)) {
+                if (failOnError) {
+                    throw new IllegalStateException("Breakpoint is already installed in the session.");
+                } else {
+                    return true;
+                }
             }
+            install(d.getDebugger());
+            this.sessions.add(d);
+            sessionsAssumptionInvalidate();
         }
-        install(d.getDebugger());
-        this.sessions.add(d);
-        sessionsAssumptionInvalidate();
         if (enabled) {
             install();
         }
@@ -525,50 +531,50 @@ public class Breakpoint {
     }
 
     private void install() {
-        assert Thread.holdsLock(this);
         SourceFilter filter;
-        if (sourceBinding == null && (filter = locationKey.createSourceFilter()) != null) {
+        EventBinding<?> binding = sourceBinding.get();
+        if (binding == null && (filter = locationKey.createSourceFilter()) != null) {
             final boolean[] sourceResolved = new boolean[]{false};
-            sourceBinding = debugger.getInstrumenter().attachExecuteSourceListener(filter, new ExecuteSourceListener() {
+            if (!sourceBinding.compareAndSet(null, binding = debugger.getInstrumenter().attachExecuteSourceListener(filter, new ExecuteSourceListener() {
                 @Override
                 public void onExecute(ExecuteSourceEvent event) {
                     if (sourceResolved[0]) {
                         return;
                     }
                     sourceResolved[0] = true;
-                    synchronized (Breakpoint.this) {
-                        if (sourceBinding != null) {
-                            sourceBinding.dispose();
-                        }
+                    EventBinding<?> eb = sourceBinding.get();
+                    if (eb != null) {
+                        eb.dispose();
                     }
                     Source source = event.getSource();
                     SourceSection location = locationKey.adjustLocation(source, debugger.getEnv(), suspendAnchor);
                     if (location != null) {
                         resolveBreakpoint(location);
                     }
-                    SourceSectionFilter locationFilter = locationKey.createLocationFilter(source, suspendAnchor);
-                    breakpointBinding = createBinding(locationFilter);
+                    assignBinding(locationKey.createLocationFilter(source, suspendAnchor));
                 }
-            }, true);
-            if (sourceResolved[0]) {
-                sourceBinding.dispose();
+            }, true)) || sourceResolved[0]) {
+                binding.dispose();
             }
-        } else if (breakpointBinding == null && (sourceBinding == null || sourceBinding.isDisposed())) {
+        } else if (breakpointBinding == null && (binding == null || binding.isDisposed())) {
             // re-installing breakpoint
-            resolved = true;
-            SourceSectionFilter locationFilter = locationKey.createLocationFilter(null, suspendAnchor);
-            breakpointBinding = createBinding(locationFilter);
+            assignBinding(locationKey.createLocationFilter(null, suspendAnchor));
         }
     }
 
-    private EventBinding<? extends ExecutionEventNodeFactory> createBinding(SourceSectionFilter locationFilter) {
+    private void assignBinding(SourceSectionFilter locationFilter) {
         EventBinding<BreakpointNodeFactory> binding = debugger.getInstrumenter().attachExecutionEventFactory(locationFilter, new BreakpointNodeFactory());
         synchronized (this) {
-            for (DebuggerSession s : sessions) {
-                s.allBindings.add(binding);
+            if (breakpointBinding == null) {
+                breakpointBinding = binding;
+                resolved = true;
+                for (DebuggerSession s : sessions) {
+                    s.allBindings.add(binding);
+                }
+            } else {
+                binding.dispose();
             }
         }
-        return binding;
     }
 
     boolean isGlobal() {
@@ -1383,11 +1389,14 @@ public class Breakpoint {
             } finally {
                 suspensionEnabledNode.execute(true, sessions);
             }
-            if (!(result instanceof Boolean)) {
-                CompilerDirectives.transferToInterpreter();
-                throw new IllegalArgumentException("Unsupported return type " + result + " in condition.");
+            if (INTEROP.isBoolean(result)) {
+                try {
+                    return INTEROP.asBoolean(result);
+                } catch (UnsupportedMessageException e) {
+                }
             }
-            return (Boolean) result;
+            CompilerDirectives.transferToInterpreter();
+            throw new IllegalArgumentException("Unsupported return type " + result + " in condition.");
         }
 
         private void initializeConditional(MaterializedFrame frame) {

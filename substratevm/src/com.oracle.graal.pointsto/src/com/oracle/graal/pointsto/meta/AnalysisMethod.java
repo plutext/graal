@@ -42,7 +42,7 @@ import org.graalvm.compiler.java.BytecodeParser.BytecodeParserError;
 import org.graalvm.compiler.nodes.StructuredGraph;
 import org.graalvm.compiler.nodes.graphbuilderconf.InvocationPlugin;
 
-import com.oracle.graal.pointsto.api.AnnotationAccess;
+import org.graalvm.util.GuardedAnnotationAccess;
 import com.oracle.graal.pointsto.api.PointstoOptions;
 import com.oracle.graal.pointsto.constraints.UnsupportedFeatureException;
 import com.oracle.graal.pointsto.flow.InvokeTypeFlow;
@@ -94,7 +94,7 @@ public class AnalysisMethod implements WrappedJavaMethod, GraphProvider {
         this.wrapped = wrapped;
         this.id = universe.nextMethodId.getAndIncrement();
 
-        if (PointstoOptions.TrackAccessChain.getValue(universe.getHostVM().options())) {
+        if (PointstoOptions.TrackAccessChain.getValue(universe.hostVM().options())) {
             startTrackInvocations();
         }
 
@@ -126,7 +126,7 @@ public class AnalysisMethod implements WrappedJavaMethod, GraphProvider {
         }
         localVariableTable = newLocalVariableTable;
 
-        typeFlow = new MethodTypeFlow(universe.getHostVM().options(), this);
+        typeFlow = new MethodTypeFlow(universe.hostVM().options(), this);
 
         if (getName().startsWith("$SWITCH_TABLE$")) {
             /*
@@ -309,6 +309,14 @@ public class AnalysisMethod implements WrappedJavaMethod, GraphProvider {
     }
 
     @Override
+    public boolean allowRuntimeCompilation() {
+        if (wrapped instanceof GraphProvider) {
+            return ((GraphProvider) wrapped).allowRuntimeCompilation();
+        }
+        return true;
+    }
+
+    @Override
     public byte[] getCode() {
         return wrapped.getCode();
     }
@@ -325,18 +333,11 @@ public class AnalysisMethod implements WrappedJavaMethod, GraphProvider {
 
     @Override
     public int getMaxLocals() {
-        if (isNative()) {
-            return getSignature().getParameterCount(!Modifier.isStatic(getModifiers())) * 2;
-        }
         return wrapped.getMaxLocals();
     }
 
     @Override
     public int getMaxStackSize() {
-        if (isNative()) {
-            // At most we have a double-slot return value.
-            return 2;
-        }
         return wrapped.getMaxStackSize();
     }
 
@@ -377,7 +378,9 @@ public class AnalysisMethod implements WrappedJavaMethod, GraphProvider {
 
     @Override
     public boolean canBeStaticallyBound() {
-        return wrapped.canBeStaticallyBound();
+        boolean result = wrapped.canBeStaticallyBound();
+        assert !isStatic() || result : "static methods must always be statically bindable";
+        return result;
     }
 
     public AnalysisMethod[] getImplementations() {
@@ -414,17 +417,17 @@ public class AnalysisMethod implements WrappedJavaMethod, GraphProvider {
 
     @Override
     public Annotation[] getAnnotations() {
-        return AnnotationAccess.getAnnotations(wrapped);
+        return GuardedAnnotationAccess.getAnnotations(wrapped);
     }
 
     @Override
     public Annotation[] getDeclaredAnnotations() {
-        return AnnotationAccess.getDeclaredAnnotations(wrapped);
+        return GuardedAnnotationAccess.getDeclaredAnnotations(wrapped);
     }
 
     @Override
     public <T extends Annotation> T getAnnotation(Class<T> annotationClass) {
-        return AnnotationAccess.getAnnotation(wrapped, annotationClass);
+        return GuardedAnnotationAccess.getAnnotation(wrapped, annotationClass);
     }
 
     @Override

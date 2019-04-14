@@ -63,7 +63,7 @@ public class TruffleInlining implements Iterable<TruffleInliningDecision>, Truff
     }
 
     private static List<TruffleInliningDecision> createDecisions(OptimizedCallTarget sourceTarget, TruffleInliningPolicy policy, CompilerOptions options) {
-        if (!TruffleRuntimeOptions.getValue(SharedTruffleRuntimeOptions.TruffleFunctionInlining)) {
+        if (!sourceTarget.getOptionValue(PolyglotCompilerOptions.Inlining) || sourceTarget.getOptionValue(PolyglotCompilerOptions.Mode) == PolyglotCompilerOptions.EngineModeEnum.LATENCY) {
             return Collections.emptyList();
         }
         int[] visitedNodes = {0};
@@ -133,9 +133,9 @@ public class TruffleInlining implements Iterable<TruffleInliningDecision>, Truff
         int recursions = countRecursions(callStack);
         int deepNodeCount = nodeCount;
 
-        if (visitedNodes[0] < (100 * TruffleRuntimeOptions.getValue(SharedTruffleRuntimeOptions.TruffleInliningMaxCallerSize)) &&
+        if (visitedNodes[0] < (100 * currentTarget.getOptionValue(PolyglotCompilerOptions.InliningNodeBudget)) &&
                         callStack.size() < 15 &&
-                        recursions <= TruffleRuntimeOptions.getValue(SharedTruffleRuntimeOptions.TruffleMaximumRecursiveInlining)) {
+                        recursions <= currentTarget.getOptionValue(PolyglotCompilerOptions.InliningRecursionDepth)) {
             /*
              * We make a preliminary optimistic inlining decision with best possible characteristics
              * to avoid the exploration of unnecessary paths in the inlining tree.
@@ -169,7 +169,8 @@ public class TruffleInlining implements Iterable<TruffleInliningDecision>, Truff
         int count = 0;
         OptimizedCallTarget top = stack.get(stack.size() - 1);
         for (int i = 0; i < stack.size() - 1; i++) {
-            if (stack.get(i) == top) {
+            final OptimizedCallTarget frameTarget = stack.get(i);
+            if (frameTarget == top || frameTarget.getSourceCallTarget() == top) {
                 count++;
             }
         }

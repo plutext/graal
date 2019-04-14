@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2018, Oracle and/or its affiliates.
+ * Copyright (c) 2016, 2019, Oracle and/or its affiliates.
  *
  * All rights reserved.
  *
@@ -187,7 +187,7 @@ import com.oracle.truffle.llvm.nodes.asm.support.LLVMAMD64AddressComputationNode
 import com.oracle.truffle.llvm.nodes.asm.support.LLVMAMD64AddressComputationNodeFactory.LLVMAMD64AddressOffsetComputationNodeGen;
 import com.oracle.truffle.llvm.nodes.asm.support.LLVMAMD64AddressComputationNodeFactory.LLVMAMD64AddressSegmentComputationNodeGen;
 import com.oracle.truffle.llvm.nodes.asm.support.LLVMAMD64Flags;
-import com.oracle.truffle.llvm.nodes.asm.support.LLVMAMD64GetTlsNode;
+import com.oracle.truffle.llvm.nodes.asm.support.LLVMAMD64GetTlsNodeGen;
 import com.oracle.truffle.llvm.nodes.asm.support.LLVMAMD64ReadAddressNodeGen;
 import com.oracle.truffle.llvm.nodes.asm.support.LLVMAMD64ReadRegisterNodeGen;
 import com.oracle.truffle.llvm.nodes.asm.support.LLVMAMD64Target;
@@ -480,7 +480,7 @@ class AsmFactory {
                 // TODO: implement properly
                 break;
             case "mfence":
-            case "lfance":
+            case "lfence":
             case "sfence":
                 statements.add(LLVMFenceNodeGen.create());
                 break;
@@ -1660,8 +1660,8 @@ class AsmFactory {
     }
 
     private void getArguments() {
-        LLVMStoreNode[] writeNodes = null;
-        LLVMExpressionNode[] valueNodes = null;
+        LLVMStoreNode[] writeNodes = LLVMStoreNode.NO_STORES;
+        LLVMExpressionNode[] valueNodes = LLVMExpressionNode.NO_EXPRESSIONS;
         if (retType instanceof StructureType) {
             writeNodes = new LLVMStoreNode[retTypes.length];
             valueNodes = new LLVMExpressionNode[retTypes.length];
@@ -1844,7 +1844,7 @@ class AsmFactory {
             assert op.getSegment() == null || "%fs".equals(op.getSegment());
             LLVMExpressionNode segment = null;
             if (op.getSegment() != null) {
-                segment = new LLVMAMD64GetTlsNode();
+                segment = LLVMAMD64GetTlsNodeGen.create();
             }
             if (base != null) {
                 baseAddress = getOperandLoad(new PointerType(type), base);

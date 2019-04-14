@@ -83,6 +83,7 @@ import com.oracle.svm.core.util.Counter;
 import com.oracle.svm.core.util.VMError;
 
 import jdk.vm.ci.meta.ResolvedJavaMethod;
+import jdk.vm.ci.services.Services;
 
 public class SubstrateUtil {
 
@@ -111,6 +112,20 @@ public class SubstrateUtil {
                 break;
         }
         return arch;
+    }
+
+    /**
+     * @return true if the standalone libgraal is being built instead of a normal SVM image.
+     */
+    public static boolean isBuildingLibgraal() {
+        return Services.IS_BUILDING_NATIVE_IMAGE;
+    }
+
+    /**
+     * @return true if running in the standalone libgraal image.
+     */
+    public static boolean isInLibgraal() {
+        return Services.IS_IN_NATIVE_IMAGE;
     }
 
     @TargetClass(com.oracle.svm.core.SubstrateUtil.class)
@@ -319,7 +334,7 @@ public class SubstrateUtil {
             log.string("No anchors").newline();
         }
         while (anchor.isNonNull()) {
-            log.string("Anchor ").zhex(anchor.rawValue()).string(" LastJavaSP ").zhex(anchor.getLastJavaSP().rawValue()).newline();
+            log.string("Anchor ").zhex(anchor.rawValue()).string(" LastJavaSP ").zhex(anchor.getLastJavaSP().rawValue()).string(" LastJavaIP ").zhex(anchor.getLastJavaIP().rawValue()).newline();
             anchor = anchor.getPreviousAnchor();
         }
         log.indent(false);
@@ -360,7 +375,7 @@ public class SubstrateUtil {
                     log.string("Found matching Anchor:").zhex(anchor.rawValue()).newline();
                     Pointer lastSp = anchor.getLastJavaSP();
                     log.string("LastJavaSP ").zhex(lastSp.rawValue()).newline();
-                    CodePointer lastIp = FrameAccess.singleton().readReturnAddress(lastSp);
+                    CodePointer lastIp = anchor.getLastJavaIP();
                     log.string("LastJavaIP ").zhex(lastIp.rawValue()).newline();
                 }
             }

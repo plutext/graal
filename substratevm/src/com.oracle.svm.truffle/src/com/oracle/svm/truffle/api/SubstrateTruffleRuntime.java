@@ -114,7 +114,7 @@ public final class SubstrateTruffleRuntime extends GraalTruffleRuntime {
         }
         if (TruffleRuntimeOptions.getValue(SharedTruffleRuntimeOptions.TraceTruffleTransferToInterpreter)) {
             if (!SubstrateOptions.IncludeNodeSourcePositions.getValue()) {
-                System.out.println("Warning: TraceTruffleTransferToInterpreter cannot print stack traces. Build image with -H:+IncludeNodeSourcePositions to enable stack traces.");
+                Log.log().string("Warning: TraceTruffleTransferToInterpreter cannot print stack traces. Build image with -H:+IncludeNodeSourcePositions to enable stack traces.").newline();
             }
             RuntimeOptionValues.singleton().update(Deoptimizer.Options.TraceDeoptimization, true);
         }
@@ -264,8 +264,6 @@ public final class SubstrateTruffleRuntime extends GraalTruffleRuntime {
             if (TruffleRuntimeOptions.getValue(SharedTruffleRuntimeOptions.TruffleCompilationExceptionsArePrinted)) {
                 Log.log().string(printStackTraceToString(e));
             }
-        } finally {
-            optimizedCallTarget.resetCompilationTask();
         }
 
         return null;
@@ -350,9 +348,6 @@ public final class SubstrateTruffleRuntime extends GraalTruffleRuntime {
         while (optionValues.advance()) {
             final OptionKey<?> key = optionValues.getKey();
             Object value = optionValues.getValue();
-            if (value == null) {
-                value = key.getDefaultValue();
-            }
             res.put(key.getName(), value);
         }
         return res;

@@ -24,7 +24,7 @@
  */
 package org.graalvm.compiler.truffle.test;
 
-import static org.graalvm.compiler.serviceprovider.GraalServices.Java8OrEarlier;
+import static org.graalvm.compiler.serviceprovider.JavaVersionUtil.Java8OrEarlier;
 import static org.graalvm.compiler.test.SubprocessUtil.getVMCommandLine;
 import static org.graalvm.compiler.test.SubprocessUtil.withoutDebuggerArguments;
 
@@ -37,6 +37,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import org.graalvm.compiler.core.CompilerThreadFactory;
+import org.graalvm.compiler.core.GraalCompilerOptions;
 import org.graalvm.compiler.core.common.util.Util;
 import org.graalvm.compiler.debug.Assertions;
 import org.graalvm.compiler.nodes.Cancellable;
@@ -85,11 +86,17 @@ public class LazyInitializationTest {
     @Test
     public void testSLTck() throws IOException, InterruptedException {
         Assume.assumeFalse(TruffleRuntimeOptions.getValue(SharedTruffleRuntimeOptions.TruffleCompileImmediately));
-        List<String> vmArgs = withoutDebuggerArguments(getVMCommandLine());
+        List<String> vmCommandLine = getVMCommandLine();
+        Assume.assumeFalse("Explicitly enables JVMCI compiler", vmCommandLine.contains("-XX:+UseJVMCINativeLibrary") || vmCommandLine.contains("-XX:+UseJVMCICompiler"));
+        List<String> vmArgs = withoutDebuggerArguments(vmCommandLine);
         vmArgs.add(Java8OrEarlier ? "-XX:+TraceClassLoading" : "-Xlog:class+init=info");
         vmArgs.add("-dsa");
         vmArgs.add("-da");
         vmArgs.add("-XX:-UseJVMCICompiler");
+
+        // Remove -Dgraal.CompilationFailureAction as it drags in CompilationWrapper
+        vmArgs = vmArgs.stream().filter(e -> !e.contains(GraalCompilerOptions.CompilationFailureAction.getName())).collect(Collectors.toList());
+
         Subprocess proc = SubprocessUtil.java(vmArgs, "com.oracle.mxtool.junit.MxJUnitWrapper", "com.oracle.truffle.sl.test.SLFactorialTest");
         int exitCode = proc.exitCode;
         if (exitCode != 0) {
@@ -223,7 +230,7 @@ public class LazyInitializationTest {
             return true;
         }
 
-        if (JVMCICompilerFactory.class.isAssignableFrom(cls) || cls.getName().equals("org.graalvm.compiler.hotspot.IsGraalPredicate")) {
+        if (JVMCICompilerFactory.class.isAssignableFrom(cls) || cls.getName().startsWith("org.graalvm.compiler.hotspot.IsGraalPredicate")) {
             // The compiler factories have to be loaded and instantiated by the JVMCI.
             return true;
         }
